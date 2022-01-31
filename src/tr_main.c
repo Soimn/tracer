@@ -97,9 +97,9 @@ CastRay(Entity* entities, umm entity_count, V3 origin, V3 dir)
                 V3 normal = Vec3(0, 1, 0); // TODO: rotate normal
                 
                 f32 par_t = V3_Inner(dir, normal);
-                f32 t     = -V3_Inner(pos, normal) / par_t;
+                f32 t     = V3_Inner(pos, normal) / par_t;
                 
-                if (par_t != 0 && t < 0)
+                if (par_t != 0 && t > 0)
                 {
                     V3 hit          = V3_Scale(dir, t);
                     f32 hit_dist_sq = V3_LengthSq(hit);
@@ -107,7 +107,7 @@ CastRay(Entity* entities, umm entity_count, V3 origin, V3 dir)
                     if (hit_dist_sq < closest_hit_dist_sq)
                     {
                         hit_data.entity     = &entities[i];
-                        hit_data.point      = hit;
+                        hit_data.point      = V3_Scale(dir, t - 0.0001f); // HACK: to avoid hit points through planes
                         hit_data.normal     = normal;
                         hit_data.reflection = V3_Normalize(V3_Add(dir, V3_Scale(normal, -V3_Inner(dir, normal))));
                         closest_hit_dist_sq = hit_dist_sq;
@@ -135,29 +135,43 @@ TraceScene(Camera camera, Entity* entities, umm entity_count)
     f32 cw = near_plane_width / camera.width;
     f32 ch = near_plane_height / camera.height;
     
+    static f32 SUN = 0;
+    V3 sun_dir = V3_Normalize(Vec3(Sin(SUN), 1, Cos(SUN)));
+    //V3 sun_dir = Vec3(0, 1, 0);
+    SUN += Platform->dt;
+    
     for (umm cy = 0; cy < camera.height; ++cy)
     {
         for (umm cx = 0; cx < camera.width; ++cx)
         {
             V3 cell = { cx * cw, -(cy * ch), 0 };
             
-            Hit_Data hit_data = CastRay(entities, entity_count, camera.pos, V3_Normalize(V3_Add(co, cell)));
+            Hit_Data hit_data    = CastRay(entities, entity_count, camera.pos, V3_Normalize(V3_Add(co, cell)));
+            Hit_Data bounce_data = {0};
+            
+            if (hit_data.entity != 0) bounce_data = CastRay(entities, entity_count, hit_data.point, sun_dir);
+            
+            umm bounce_count = (hit_data.entity != 0) + (bounce_data.entity != 0);
+            
+#if 0
+            u32 color = 0;
+            if (bounce_count == 0) color = V3_ToRGBU32(camera.sky_color);
+            else if (bounce_count == 1) color = 0xFF0000;
+            else if (bounce_count == 2) color = 0xFF00FF;
+            
+            camera.data[cy * camera.width + cx] = color;
+#endif
             
             if (hit_data.entity != 0)
             {
-                static f32 SUN = 0;
-                V3 sun_dir = V3_Normalize(Vec3(Sin(SUN), 1, Cos(SUN)));
-                SUN += Platform->dt * 0.001f;
-                
-                //Hit_Data data = CastRay(entities, entity_count, hit_data.point, sun_dir);
-                
                 f32 l = V3_Inner(hit_data.normal, sun_dir);
                 
                 V3 color = V3_FromRGBU32(hit_data.entity->color);
                 
                 color = V3_Scale(color, MIN(MAX(0.2f, l), 1));
                 
-                //Platform->image[cy * Platform->width + cx] = (data.entity == 0 ? V3_ToRGBU32(color) : 0);
+                color = V3_Scale(color, 1.0f / bounce_count);
+                
                 Platform->image[cy * Platform->width + cx] = V3_ToRGBU32(color);
             }
             
@@ -180,7 +194,7 @@ global Camera MainCamera = {
 global Entity Entities[] = {
     {
         .kind  = Entity_Plane,
-        .pos   = {0, -0.5, 0},
+        .pos   = {0, -1.2f, 0},
         .color = 0x00212121,
     },
     
@@ -197,7 +211,7 @@ Tick(Platform_Data* platform_data)
 {
     Platform = platform_data;
     
-    if (MainCamera.data == 0 || MainCamera.width != Platform->width || MainCamera.height != Platform->height)
+    //if (MainCamera.data == 0 || MainCamera.width != Platform->width || MainCamera.height != Platform->height)
     {
         MainCamera.data   = Platform->image;
         MainCamera.width  = Platform->width;
