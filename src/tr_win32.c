@@ -380,7 +380,7 @@ WindowProc(HWND window_handle, UINT message, WPARAM wparam, LPARAM lparam)
         
         ASSERT(byte_size <= U32_MAX);
         
-        if (Backbuffer != 0) VirtualFree(Backbuffer, (umm)Platform->width*(umm)Platform->height, MEM_RELEASE);
+        if (Backbuffer != 0) VirtualFree(Backbuffer, (umm)Platform->width*(umm)Platform->height * 4, MEM_RELEASE);
         Backbuffer = VirtualAlloc(0, byte_size * 2, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
         
         Platform->image  = (u32*)(Backbuffer + byte_size);

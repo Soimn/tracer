@@ -146,7 +146,10 @@ TraceScene(Camera camera, Entity* entities, umm entity_count)
         {
             V3 cell = { (cx + 0.5f) * cw, -((cy + 0.5f) * ch), 0 };
             
-            Hit_Data hit_data    = CastRay(entities, entity_count, 0, camera.pos, V3_Normalize(V3_Add(co, cell)));
+            V3 dir = V3_Normalize(V3_Add(co, cell));
+            
+#if 0
+            Hit_Data hit_data    = CastRay(entities, entity_count, 0, camera.pos, dir);
             Hit_Data bounce_data = {0};
             
             if (hit_data.entity != 0) bounce_data = CastRay(entities, entity_count, &hit_data, hit_data.point, sun_dir);
@@ -173,14 +176,47 @@ TraceScene(Camera camera, Entity* entities, umm entity_count)
                 
                 color = V3_Scale(color, 1.0f / bounce_count);
             }
+#endif
+            
+#if 1
+            Hit_Data hit_data        = CastRay(entities, entity_count, 0, camera.pos, dir);
+            bool hit_data_is_sun_lit = (CastRay(entities, entity_count, &hit_data, hit_data.point, sun_dir).entity == 0);
+            
+            Hit_Data bounce_data        = CastRay(entities, entity_count, &hit_data, hit_data.point, hit_data.reflection);
+            bool bounce_data_is_sun_lit = (CastRay(entities, entity_count, &bounce_data, bounce_data.point, sun_dir).entity != 0);
+            
+            V3 color = camera.sky_color;
+            if (hit_data.entity != 0)
+            {
+                color = V3_FromRGBU32(hit_data.entity->color);
+                
+                f32 ambient_light = 0.25f;
+                
+                if (hit_data_is_sun_lit) color = V3_Scale(color, MIN(MAX(ambient_light, V3_Inner(hit_data.normal, sun_dir)), 1));
+                else                     color = V3_Scale(color, ambient_light);
+                
+                V3 mix_color = camera.sky_color;
+                if (bounce_data.entity != 0)
+                {
+                    mix_color = V3_FromRGBU32(bounce_data.entity->color);
+                    
+                    if (bounce_data_is_sun_lit) mix_color = V3_Scale(color, MIN(MAX(ambient_light, V3_Inner(bounce_data.normal, sun_dir)), 1));
+                    else                        mix_color = V3_Scale(color, ambient_light);
+                }
+                
+                color = V3_Add(V3_Scale(color, 0.9f), V3_Scale(mix_color, 0.2f));
+            }
+#endif
+            
             
             u32 fragment_width  = camera.target_width / camera.width;
             u32 fragment_height = camera.target_height / camera.height;
+            u32 rgb             = V3_ToRGBU32(color);
             for (umm j = 0; j < fragment_height; ++j)
             {
                 for (umm i = 0; i < fragment_width; ++i)
                 {
-                    camera.data[(cy * fragment_height + j) * camera.target_width + (cx * fragment_width + i)] = V3_ToRGBU32(color);
+                    camera.data[(cy * fragment_height + j) * camera.target_width + (cx * fragment_width + i)] = rgb;
                 }
             }
         }
@@ -212,6 +248,27 @@ global Entity Entities[] = {
         .pos   = {0, 0, 5},
         .spheroid.radius = 1,
         .color = 0x00FF0000,
+    },
+    
+    {
+        .kind  = Entity_Spheroid,
+        .pos   = {-1, 4, 8},
+        .spheroid.radius = 1.5f,
+        .color = 0x00128812,
+    },
+    
+    {
+        .kind  = Entity_Spheroid,
+        .pos   = {-10, 3, 20},
+        .spheroid.radius = 2.4f,
+        .color = 0x00331266,
+    },
+    
+    {
+        .kind  = Entity_Spheroid,
+        .pos   = {15, 6, 40},
+        .spheroid.radius = 2.5f,
+        .color = 0x00008866,
     },
 };
 
