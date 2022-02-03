@@ -134,7 +134,11 @@ ComputeLight(Scene* scene, Hit_Data* ignored_hit, V3 pos, V3 ray, imm ttl)
     {
         Hit_Data hit_data = CastRay(scene, ignored_hit, pos, ray);
         
-        if (hit_data.entity == 0) light = scene->sky_color;
+        if (hit_data.entity == 0)
+        {
+            
+        }
+        
         else
         {
             Hit_Data sun_data = CastRay(scene, &hit_data, hit_data.point, scene->sun_dir);
@@ -163,11 +167,25 @@ TraceScanline(Camera* camera, Scene* scene, V3 cell_origin, V2 cell_dim, umm sta
         for (umm cx = 0; cx < camera->width; ++cx)
         {
             V3 ray_dir = {
-                cell_origin.x + cx * cell_dim.x,
-                cell_origin.y - (cy * cell_dim.y), cell_origin.z
+                cell_origin.x + (cx + 0.5f) * cell_dim.x,
+                cell_origin.y - ((cy + 0.5f) * cell_dim.y), cell_origin.z
             };
             
-            V3 color = ComputeLight(scene, 0, camera->pos, V3_Normalize(ray_dir), camera->bounce_count);
+            V3 offsets[4] = {
+                { Sin((f32)cx)    * cell_dim.x / 2, Cos((f32)cy*cy) * cell_dim.y / 2, 0 },
+                { Sin((f32)cy)    * cell_dim.x / 2, Cos((f32)cx*cx) * cell_dim.y / 2, 0 },
+                { Sin((f32)cx*cx) * cell_dim.x / 2, Cos((f32)cy)    * cell_dim.y / 2, 0 },
+                { Sin((f32)cy*cy) * cell_dim.x / 2, Cos((f32)cx)    * cell_dim.y / 2, 0 },
+            };
+            
+            V3 color = {0};
+            
+            for (umm i = 0; i < 4; ++i)
+            {
+                color = V3_Add(color, ComputeLight(scene, 0, camera->pos, V3_Normalize(V3_Add(ray_dir, offsets[i])), camera->bounce_count));
+            }
+            
+            color = V3_Scale(color, 0.25f);
             
             u32 rgb = V3_ToRGBU32(color);
             for (umm j = 0; j < fragment_height; ++j)
@@ -271,7 +289,7 @@ Tick(Platform_Data* platform_data, Platform_Input input)
     {
         MainCamera.target_width  = Platform->width;
         MainCamera.target_height = Platform->height;
-        MainCamera.fragment_size = 512;
+        MainCamera.fragment_size = 64;
         
         should_rerender = true;
     }
@@ -288,7 +306,7 @@ Tick(Platform_Data* platform_data, Platform_Input input)
     {
         MainCamera.pos.xy = V2_Add(MainCamera.pos.xy, V2_Scale(input.dir, Platform->dt));
         
-        MainCamera.fragment_size = 512;
+        MainCamera.fragment_size = 64;
         should_rerender = true;
     }
     
