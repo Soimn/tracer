@@ -180,7 +180,12 @@ typedef struct Platform_Data
 
 Platform_Data* Platform;
 
-#include "tr_memory.h"
 #include "tr_math.h"
+#include "tr_memory.h"
 
-TYPEDEF_FUNC(void, platform_tick, Platform_Data* platform_data);
+typedef struct Platform_Input
+{
+    V2 dir;
+} Platform_Input;
+
+TYPEDEF_FUNC(void, platform_tick, Platform_Data* platform_data, Platform_Input input);

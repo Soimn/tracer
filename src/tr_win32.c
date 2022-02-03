@@ -332,12 +332,12 @@ Win32_LoadCode(Win32_Code* code, LPWSTR code_path, LPWSTR temp_code_path, LPWSTR
     {
         HMODULE handle = LoadLibraryW(temp_code_path);
         
-        if (handle == 0) Win32_Print("Failed to load code dll");
+        if (handle == 0) Win32_Print("Failed to load code dll\n");
         else
         {
             platform_tick tick = (platform_tick)GetProcAddress(handle, "Tick");
             
-            if (tick == 0) Win32_Print("Failed to load tick function");
+            if (tick == 0) Win32_Print("Failed to load tick function\n");
             else
             {
                 FreeLibrary(handle);
@@ -449,14 +449,14 @@ WinMainCRTStartup()
         .lpszClassName = L"Tracer",
     };
     
-    if (!RegisterClassW(&window_class)) Win32_Print("Failed to register window class");
+    if (!RegisterClassW(&window_class)) Win32_Print("Failed to register window class\n");
     else
     {
         window_handle = CreateWindowExW(0, L"Tracer", L"Tracer", WS_OVERLAPPEDWINDOW,
                                         CW_USEDEFAULT, CW_USEDEFAULT, 200, 200, // CW_USEDEFAULT, CW_USEDEFAULT,
                                         0, 0, instance, 0);
         
-        if (window_handle == INVALID_HANDLE_VALUE) Win32_Print("Failed to create window");
+        if (window_handle == INVALID_HANDLE_VALUE) Win32_Print("Failed to create window\n");
         else
         {
             bool setup_failed = false;
@@ -516,13 +516,13 @@ WinMainCRTStartup()
                             code.timestamp = timestamp;
                         }
                         
-                        Win32_Print("Successfully loaded code");
+                        Win32_Print("Successfully loaded code\n");
                         break;
                     }
                     
                     else if (tries == 10)
                     {
-                        Win32_Print("Failed to load code");
+                        Win32_Print("Failed to load code\n");
                         setup_failed = true;
                         break;
                     }
@@ -558,7 +558,7 @@ WinMainCRTStartup()
                                 code.timestamp = code_timestamp;
                             }
                             
-                            Win32_Print("Successfully reloaded code");
+                            Win32_Print("Successfully reloaded code\n");
                         }
                     }
                     
@@ -575,7 +575,16 @@ WinMainCRTStartup()
                     }
                     
                     Platform->dt = 1 / 60.0f;
-                    code.tick(Platform);
+                    
+                    Platform_Input input = {
+                        .dir = {
+                            .x = (f32)(-((GetKeyState(VK_LEFT) & (1 << 15)) != 0) + ((GetKeyState(VK_RIGHT) & (1 << 15)) != 0)),
+                            .y = (f32)(-((GetKeyState(VK_DOWN) & (1 << 15)) != 0) + ((GetKeyState(VK_UP)    & (1 << 15)) != 0)),
+                        },
+                    };
+                    
+                    u32* image = Platform->image;
+                    code.tick(Platform, input);
                     
                     InvalidateRect(window_handle, 0, 0);
                     
@@ -583,7 +592,10 @@ WinMainCRTStartup()
                     LARGE_INTEGER end_time;
                     QueryPerformanceCounter(&end_time);
                     
-                    Win32_Print("frame time: %ums\n", (u32)(1000 * (f32)(end_time.QuadPart - flip_time.QuadPart) / perf_freq.QuadPart));
+                    if (image != Platform->image)
+                    {
+                        Win32_Print("frame time: %ums\n", (u32)(1000 * (f32)(end_time.QuadPart - flip_time.QuadPart) / perf_freq.QuadPart));
+                    }
                     
                     flip_time = end_time;
                 }

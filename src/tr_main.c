@@ -41,186 +41,165 @@ typedef struct Camera
     V4 rot;
     f32 fov;
     u32 bounce_count;
-    V3 sky_color;
 } Camera;
+
+typedef struct Scene
+{
+    Entity* entities;
+    u32 entity_count;
+    V3 sky_color;
+    V3 sun_color;
+    V3 sun_dir;
+} Scene;
 
 typedef struct Hit_Data
 {
     V3 point;
     V3 normal;
-    V3 reflection;
     Entity* entity;
 } Hit_Data;
 
 internal Hit_Data
-CastRay(Entity* entities, umm entity_count, Hit_Data* prev_hit, V3 origin, V3 dir)
+CastRay(Scene* scene, Hit_Data* ignored_hit, V3 origin, V3 dir)
 {
     Hit_Data hit_data = {0};
     
     f32 closest_hit_dist_sq = F32_Inf();
-    for (umm i = 0; i < entity_count; ++i)
+    for (umm i = 0; i < scene->entity_count; ++i)
     {
-        V3 pos = V3_Sub(entities[i].pos, origin);
+        V3 pos          = V3_Sub(scene->entities[i].pos, origin);
+        V3 hit          = {0};
+        V3 normal       = {0};
+        f32 hit_dist_sq = F32_Inf();
         
-        switch (entities[i].kind)
+        switch (scene->entities[i].kind)
         {
             case Entity_Spheroid:
             {
                 // TODO: handle oblate spheroids
                 f32 depth = V3_Inner(pos, dir);
-                f32 par_t = Squared(depth) - V3_Inner(pos, pos) + Squared(entities[i].spheroid.radius);
+                f32 par_t = Squared(depth) - V3_Inner(pos, pos) + Squared(scene->entities[i].spheroid.radius);
                 
                 if (depth > 0 && par_t >= 0)
                 {
                     f32 t = depth - Sqrt(par_t);
                     
-                    V3 hit          = V3_Scale(dir, t);
-                    f32 hit_dist_sq = V3_LengthSq(hit);
-                    
-                    if (hit_dist_sq < closest_hit_dist_sq && (prev_hit == 0 || prev_hit->entity != &entities[i]))
-                    {
-                        V3 normal = V3_Normalize(V3_Sub(hit, pos));
-                        
-                        hit_data.entity     = &entities[i];
-                        hit_data.point      = hit;
-                        hit_data.normal     = normal;
-                        hit_data.reflection = V3_Normalize(V3_Add(dir, V3_Scale(normal, -V3_Inner(dir, normal))));
-                        closest_hit_dist_sq = hit_dist_sq;
-                    }
+                    hit         = V3_Scale(dir, t);
+                    hit_dist_sq = V3_LengthSq(hit);
+                    normal      = V3_Normalize(V3_Sub(hit, pos));
                 }
             } break;
             
             case Entity_Cuboid:
             {
                 NOT_IMPLEMENTED;
+                
             } break;
             
             case Entity_Plane:
             {
-                V3 normal = Vec3(0, 1, 0); // TODO: rotate normal
+                normal = Vec3(0, 1, 0); // TODO: rotate normal
                 
                 f32 par_t = V3_Inner(dir, normal);
                 f32 t     = V3_Inner(pos, normal) / par_t;
                 
                 if (par_t != 0 && t > 0)
                 {
-                    V3 hit          = V3_Scale(dir, t);
-                    f32 hit_dist_sq = V3_LengthSq(hit);
-                    
-                    if (hit_dist_sq < closest_hit_dist_sq && (prev_hit == 0 || prev_hit->entity != &entities[i]))
-                    {
-                        hit_data.entity     = &entities[i];
-                        hit_data.point      = hit;
-                        hit_data.normal     = normal;
-                        hit_data.reflection = V3_Normalize(V3_Add(dir, V3_Scale(normal, -V3_Inner(dir, normal))));
-                        closest_hit_dist_sq = hit_dist_sq;
-                    }
+                    hit         = V3_Scale(dir, t);
+                    hit_dist_sq = V3_LengthSq(hit);
                 }
             } break;
             
             INVALID_DEFAULT_CASE;
+        }
+        
+        if (hit_dist_sq < closest_hit_dist_sq && (ignored_hit == 0 || &scene->entities[i] != ignored_hit->entity))
+        {
+            hit_data.entity     = &scene->entities[i];
+            hit_data.point      = hit;
+            hit_data.normal     = normal;
+            closest_hit_dist_sq = hit_dist_sq;
         }
     }
     
     return hit_data;
 }
 
-#define MAX_BOUNCE_COUNT 16
-internal void
-TraceScene(Camera camera, Entity* entities, umm entity_count)
+internal V3
+ComputeLight(Scene* scene, Hit_Data* ignored_hit, V3 pos, V3 ray, imm ttl)
 {
-    f32 near_plane_width  = 1;
-    f32 near_plane_height = (f32)camera.height / camera.width;
-    f32 near_plane_depth  = (near_plane_width / 2) / Tan(camera.fov / 2);
+    V3 light = {0};
     
-    V3 co = { -near_plane_width / 2, +near_plane_height / 2, +near_plane_depth };
-    
-    f32 cw = near_plane_width / camera.width;
-    f32 ch = near_plane_height / camera.height;
-    
-    V3 sun_dir = V3_Normalize(Vec3(Sin(40), 1, Cos(40)));
-    
-    for (umm cy = 0; cy < camera.height; ++cy)
+    if (ttl-- > 0)
     {
-        for (umm cx = 0; cx < camera.width; ++cx)
+        Hit_Data hit_data = CastRay(scene, ignored_hit, pos, ray);
+        
+        if (hit_data.entity == 0) light = scene->sky_color;
+        else
         {
-            V3 cell = { (cx + 0.5f) * cw, -((cy + 0.5f) * ch), 0 };
+            Hit_Data sun_data = CastRay(scene, &hit_data, hit_data.point, scene->sun_dir);
             
-            V3 dir = V3_Normalize(V3_Add(co, cell));
+            f32 sun_light = (sun_data.entity == 0 ? V3_Inner(hit_data.normal, scene->sun_dir) : 0);
+            sun_light = MAX(sun_light, 0);
             
-#if 0
-            Hit_Data hit_data    = CastRay(entities, entity_count, 0, camera.pos, dir);
-            Hit_Data bounce_data = {0};
+            V3 albedo = V3_FromRGBU32(hit_data.entity->color);
             
-            if (hit_data.entity != 0) bounce_data = CastRay(entities, entity_count, &hit_data, hit_data.point, sun_dir);
+            f32 light_strength = 0.2f + sun_light;
+            light = V3_Scale(albedo, MIN(MAX(light_strength, 0.2f), 1));
+        }
+    }
+    
+    return light;
+}
+
+internal void
+TraceScanline(Camera* camera, Scene* scene, V3 cell_origin, V2 cell_dim, umm start, umm end)
+{
+    u32 fragment_width  = camera->target_width / camera->width;
+    u32 fragment_height = camera->target_height / camera->height;
+    
+    for (umm cy = start; cy < end; ++cy)
+    {
+        for (umm cx = 0; cx < camera->width; ++cx)
+        {
+            V3 ray_dir = {
+                cell_origin.x + cx * cell_dim.x,
+                cell_origin.y - (cy * cell_dim.y), cell_origin.z
+            };
             
-            umm bounce_count = (hit_data.entity != 0) + (bounce_data.entity != 0);
+            V3 color = ComputeLight(scene, 0, camera->pos, V3_Normalize(ray_dir), camera->bounce_count);
             
-#if 0
-            u32 color = 0;
-            if (bounce_count == 0) color = V3_ToRGBU32(camera.sky_color);
-            else if (bounce_count == 1) color = 0xFF0000;
-            else if (bounce_count == 2) color = 0xFF00FF;
-            
-            camera.data[cy * camera.width + cx] = color;
-#endif
-            
-            V3 color = camera.sky_color;
-            if (hit_data.entity != 0)
-            {
-                f32 l = V3_Inner(hit_data.normal, sun_dir);
-                
-                color = V3_FromRGBU32(hit_data.entity->color);
-                
-                color = V3_Scale(color, MIN(MAX(0.2f, l), 1));
-                
-                color = V3_Scale(color, 1.0f / bounce_count);
-            }
-#endif
-            
-#if 1
-            Hit_Data hit_data        = CastRay(entities, entity_count, 0, camera.pos, dir);
-            bool hit_data_is_sun_lit = (CastRay(entities, entity_count, &hit_data, hit_data.point, sun_dir).entity == 0);
-            
-            Hit_Data bounce_data        = CastRay(entities, entity_count, &hit_data, hit_data.point, hit_data.reflection);
-            bool bounce_data_is_sun_lit = (CastRay(entities, entity_count, &bounce_data, bounce_data.point, sun_dir).entity != 0);
-            
-            V3 color = camera.sky_color;
-            if (hit_data.entity != 0)
-            {
-                color = V3_FromRGBU32(hit_data.entity->color);
-                
-                f32 ambient_light = 0.25f;
-                
-                if (hit_data_is_sun_lit) color = V3_Scale(color, MIN(MAX(ambient_light, V3_Inner(hit_data.normal, sun_dir)), 1));
-                else                     color = V3_Scale(color, ambient_light);
-                
-                V3 mix_color = camera.sky_color;
-                if (bounce_data.entity != 0)
-                {
-                    mix_color = V3_FromRGBU32(bounce_data.entity->color);
-                    
-                    if (bounce_data_is_sun_lit) mix_color = V3_Scale(color, MIN(MAX(ambient_light, V3_Inner(bounce_data.normal, sun_dir)), 1));
-                    else                        mix_color = V3_Scale(color, ambient_light);
-                }
-                
-                color = V3_Add(V3_Scale(color, 0.9f), V3_Scale(mix_color, 0.2f));
-            }
-#endif
-            
-            
-            u32 fragment_width  = camera.target_width / camera.width;
-            u32 fragment_height = camera.target_height / camera.height;
-            u32 rgb             = V3_ToRGBU32(color);
+            u32 rgb = V3_ToRGBU32(color);
             for (umm j = 0; j < fragment_height; ++j)
             {
                 for (umm i = 0; i < fragment_width; ++i)
                 {
-                    camera.data[(cy * fragment_height + j) * camera.target_width + (cx * fragment_width + i)] = rgb;
+                    camera->data[(cy * fragment_height + j) * camera->target_width + (cx * fragment_width + i)] = rgb;
                 }
             }
         }
     }
+}
+
+internal void
+TraceScene(Camera* camera, Scene* scene)
+{
+    f32 near_plane_width  = 1;
+    f32 near_plane_height = (f32)camera->height / camera->width;
+    f32 near_plane_depth  = (near_plane_width / 2) / Tan(camera->fov / 2);
+    
+    V3 co = { -near_plane_width / 2, +near_plane_height / 2, +near_plane_depth };
+    V2 cd = { near_plane_width  / camera->width, near_plane_height / camera->height };
+    
+    umm scanline_size = 50;
+    imm scanlines     = camera->height / scanline_size;
+    
+    for (imm scanline = 0; scanline < scanlines - 1; ++scanline)
+    {
+        TraceScanline(camera, scene, co, cd, scanline * scanline_size, (scanline + 1) * scanline_size);
+    }
+    
+    TraceScanline(camera, scene, co, cd, MAX(scanlines - 1, 0) * scanline_size, camera->height);
 }
 
 global Camera MainCamera = {
@@ -232,8 +211,7 @@ global Camera MainCamera = {
     .pos           = { 0, 0, 0},
     .rot           = { 0, 0, 0, 1 },
     .fov           = HALF_PI32,
-    .bounce_count  = 1,
-    .sky_color     = {0.1f, 0.5f, 0.9f},
+    .bounce_count  = 10,
 };
 
 global Entity Entities[] = {
@@ -272,10 +250,21 @@ global Entity Entities[] = {
     },
 };
 
+global Scene MainScene = {
+    .entities      = Entities,
+    .entity_count  = ARRAY_SIZE(Entities),
+    .sky_color     = {0.1f, 0.5f, 0.9f},
+    .sun_color     = {1, 1, 1},
+};
+
 void
-Tick(Platform_Data* platform_data)
+Tick(Platform_Data* platform_data, Platform_Input input)
 {
     Platform = platform_data;
+    
+    MainScene.sun_dir = V3_Normalize(Vec3(Sin(40), 1, Cos(40)));
+    
+    bool should_rerender = false;
     
     if (MainCamera.target_width != Platform->width ||
         MainCamera.target_height != Platform->height)
@@ -283,17 +272,36 @@ Tick(Platform_Data* platform_data)
         MainCamera.target_width  = Platform->width;
         MainCamera.target_height = Platform->height;
         MainCamera.fragment_size = 512;
+        
+        should_rerender = true;
     }
     
-    if (MainCamera.width != MainCamera.target_width ||
-        MainCamera.height != MainCamera.target_height)
+    else if (MainCamera.width != MainCamera.target_width ||
+             MainCamera.height != MainCamera.target_height)
+    {
+        MainCamera.fragment_size = MAX(MainCamera.fragment_size / 2, 1);
+        
+        should_rerender = true;
+    }
+    
+    if (input.dir.x != 0 || input.dir.y != 0)
+    {
+        MainCamera.pos.xy = V2_Add(MainCamera.pos.xy, V2_Scale(input.dir, Platform->dt));
+        
+        MainCamera.fragment_size = 512;
+        should_rerender = true;
+    }
+    
+    if (should_rerender)
     {
         MainCamera.width  = (u32)((f32)MainCamera.target_width  / MainCamera.fragment_size); 
         MainCamera.height = (u32)((f32)MainCamera.target_height / MainCamera.fragment_size); 
-        MainCamera.fragment_size = MAX(MainCamera.fragment_size / 2, 1);
+        MainCamera.width  = MAX(MainCamera.width,  1);
+        MainCamera.height = MAX(MainCamera.height, 1);
         
         MainCamera.data = Platform->image;
-        TraceScene(MainCamera, Entities, ARRAY_SIZE(Entities));
+        
+        TraceScene(&MainCamera, &MainScene);
         Platform->SwapBuffers();
     }
 }

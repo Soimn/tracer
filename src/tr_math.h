@@ -49,6 +49,29 @@ Sqrt(f32 n)
 }
 
 internal inline f32
+PowNat(f32 n, i32 pow)
+{
+    f32 result = 1;
+    if (pow >= 0)
+    {
+        for (umm i = 0; i < pow; ++i)
+        {
+            result *= n;
+        }
+    }
+    
+    else
+    {
+        for (umm i = 0; i < (umm)-pow; ++i)
+        {
+            result /= n;
+        }
+    }
+    
+    return result;
+}
+
+internal inline f32
 Sgn(f32 x)
 {
     return (F32_Bits){ .bits = (F32_Bits){ .flt = x }.bits & (1 << 31) }.flt;
@@ -373,6 +396,12 @@ internal inline u32
 V3_ToRGBU32(V3 color)
 {
     return (u32)(color.r*255) << 16 | (u32)(color.g*255) << 8 | (u32)(color.b*255);
+}
+
+internal inline V3
+V3_ReflectRay(V3 ray, V3 plane_normal)
+{
+    return V3_Sub(ray, V3_Scale(plane_normal, 2 * V3_Inner(ray, plane_normal)));
 }
 
 internal M2
