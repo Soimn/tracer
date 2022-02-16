@@ -40,16 +40,16 @@ typedef struct Camera
     V3 pos;
     V4 rot;
     f32 fov;
-    u32 bounce_count;
 } Camera;
 
 typedef struct Scene
 {
     Entity* entities;
     u32 entity_count;
-    V3 sky_color;
-    V3 sun_color;
     V3 sun_dir;
+    u32* skybox_data;
+    u32 skybox_width;
+    u32 skybox_height;
 } Scene;
 
 typedef struct Hit_Data
@@ -126,34 +126,36 @@ CastRay(Scene* scene, Hit_Data* ignored_hit, V3 origin, V3 dir)
 }
 
 internal V3
-ComputeLight(Scene* scene, Hit_Data* ignored_hit, V3 pos, V3 ray, imm ttl)
+ComputeLight(Scene* scene, Hit_Data* ignored_hit, V3 pos, V3 ray, V3 energy)
 {
     V3 light = {0};
     
-    if (ttl-- > 0)
+    Hit_Data hit_data = CastRay(scene, ignored_hit, pos, ray);
+    
+    if (hit_data.entity == 0)
     {
-        Hit_Data hit_data = CastRay(scene, ignored_hit, pos, ray);
-        
-        if (hit_data.entity == 0)
-        {
-            
-        }
-        
-        else
-        {
-            Hit_Data sun_data = CastRay(scene, &hit_data, hit_data.point, scene->sun_dir);
-            
-            f32 sun_light = (sun_data.entity == 0 ? V3_Inner(hit_data.normal, scene->sun_dir) : 0);
-            sun_light = MAX(sun_light, 0);
-            
-            V3 albedo = V3_FromRGBU32(hit_data.entity->color);
-            
-            f32 light_strength = 0.2f + sun_light;
-            light = V3_Scale(albedo, MIN(MAX(light_strength, 0.2f), 1));
-        }
+        u32 y = (u32)((f32)(scene->skybox_height - 1)*Abs(V3_Inner(ray, Vec3(0, 1, 0))));
+        u32 x = (u32)(5.0f*scene->skybox_width*(u32)Abs((1 + V3_Inner(ray, Vec3(0, 1, 0))) / 2)) % scene->skybox_width;
+        light = V3_FromRGBU32(scene->skybox_data[y * scene->skybox_width + x]);
     }
     
-    return light;
+    else
+    {
+        //Hit_Data sun_data = CastRay(scene, &hit_data, hit_data.point, scene->sun_dir);
+        
+        //f32 sun_light = (sun_data.entity == 0 ? V3_Inner(hit_data.normal, scene->sun_dir) : 0);
+        //sun_light = MAX(sun_light, 0);
+        
+        //V3 albedo = V3_FromRGBU32(hit_data.entity->color);
+        
+        //f32 light_strength = 0.2f + sun_light;
+        //light = V3_Scale(albedo, MIN(MAX(light_strength, 0.2f), 1));
+        
+        V3 reflected_ray = V3_Normalize(V3_Add(ray, V3_Scale(hit_data.normal, -2*V3_Inner(hit_data.normal, ray))));
+        light = ComputeLight(scene, &hit_data, hit_data.point, reflected_ray, V3_Hadamard(energy, Vec3(0.8f, 0.8f, 0.9f)));
+    }
+    
+    return V3_Hadamard(light, energy);
 }
 
 internal void
@@ -172,17 +174,17 @@ TraceScanline(Camera* camera, Scene* scene, V3 cell_origin, V2 cell_dim, umm sta
             };
             
             V3 offsets[4] = {
-                { Sin((f32)cx)    * cell_dim.x / 2, Cos((f32)cy*cy) * cell_dim.y / 2, 0 },
-                { Sin((f32)cy)    * cell_dim.x / 2, Cos((f32)cx*cx) * cell_dim.y / 2, 0 },
-                { Sin((f32)cx*cx) * cell_dim.x / 2, Cos((f32)cy)    * cell_dim.y / 2, 0 },
-                { Sin((f32)cy*cy) * cell_dim.x / 2, Cos((f32)cx)    * cell_dim.y / 2, 0 },
+                { Sin((f32)cx)    * cell_dim.x / 3, Cos((f32)cy*cy) * cell_dim.y / 3, 0 },
+                { Sin((f32)cy)    * cell_dim.x / 3, Cos((f32)cx*cx) * cell_dim.y / 3, 0 },
+                { Sin((f32)cx*cx) * cell_dim.x / 3, Cos((f32)cy)    * cell_dim.y / 3, 0 },
+                { Sin((f32)cy*cy) * cell_dim.x / 3, Cos((f32)cx)    * cell_dim.y / 3, 0 },
             };
             
             V3 color = {0};
             
             for (umm i = 0; i < 4; ++i)
             {
-                color = V3_Add(color, ComputeLight(scene, 0, camera->pos, V3_Normalize(V3_Add(ray_dir, offsets[i])), camera->bounce_count));
+                color = V3_Add(color, ComputeLight(scene, 0, camera->pos, V3_Normalize(V3_Add(ray_dir, offsets[i])), (V3){1,1,1}));
             }
             
             color = V3_Scale(color, 0.25f);
@@ -229,7 +231,6 @@ global Camera MainCamera = {
     .pos           = { 0, 0, 0},
     .rot           = { 0, 0, 0, 1 },
     .fov           = HALF_PI32,
-    .bounce_count  = 10,
 };
 
 global Entity Entities[] = {
@@ -242,6 +243,20 @@ global Entity Entities[] = {
     {
         .kind  = Entity_Spheroid,
         .pos   = {0, 0, 5},
+        .spheroid.radius = 1,
+        .color = 0x00FF0000,
+    },
+    
+    {
+        .kind  = Entity_Spheroid,
+        .pos   = {2.5f, 0, 7},
+        .spheroid.radius = 1,
+        .color = 0x00FF0000,
+    },
+    
+    {
+        .kind  = Entity_Spheroid,
+        .pos   = {-2.5f, 0, 7},
         .spheroid.radius = 1,
         .color = 0x00FF0000,
     },
@@ -271,8 +286,6 @@ global Entity Entities[] = {
 global Scene MainScene = {
     .entities      = Entities,
     .entity_count  = ARRAY_SIZE(Entities),
-    .sky_color     = {0.1f, 0.5f, 0.9f},
-    .sun_color     = {1, 1, 1},
 };
 
 void
@@ -280,7 +293,23 @@ Tick(Platform_Data* platform_data, Platform_Input input)
 {
     Platform = platform_data;
     
-    MainScene.sun_dir = V3_Normalize(Vec3(Sin(40), 1, Cos(40)));
+    if (MainScene.skybox_data == 0)
+    {
+        MainScene.sun_dir = V3_Normalize(Vec3(Sin(40), 1, Cos(40)));
+        
+        String contents;
+        Targa_Header header;
+        if (Platform->ReadEntireFile(Platform->persistent_arena, STRING("skybox.tga"), &contents) &&
+            Targa_ReadHeader(contents, &header) &&
+            header.image_format == TargaImageFormat_UncompressedTrueColor)
+        {
+            MainScene.skybox_width  = header.width;
+            MainScene.skybox_height = header.height;
+            MainScene.skybox_data   = (u32*)header.data;
+        }
+        
+        else Platform->Print("Failed to load skybox\n");
+    }
     
     bool should_rerender = false;
     

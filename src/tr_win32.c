@@ -306,6 +306,51 @@ Win32_SwapBuffers()
 }
 
 internal bool
+Win32_ReadEntireFile(Memory_Arena* arena, String path, String* file_contents)
+{
+    bool succeeded = false;
+    
+    Memory_Arena_Marker marker = Arena_BeginTempMemory(Platform->transient_arena);
+    
+    HANDLE file_handle = INVALID_HANDLE_VALUE;
+    
+    int required_chars = MultiByteToWideChar(CP_UTF8, 0, (LPCCH)path.data, (int)path.size, 0, 0);
+    
+    if (required_chars != 0)
+    {
+        WCHAR* wide_path = Arena_PushSize(Platform->transient_arena, (required_chars + 1) * sizeof(WCHAR), ALIGNOF(WCHAR));
+        
+        if (MultiByteToWideChar(CP_UTF8, 0, (LPCCH)path.data, (int)path.size, wide_path, required_chars) == required_chars)
+        {
+            wide_path[required_chars] = 0;
+            
+            file_handle = CreateFileW(wide_path, GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, 0, 0);
+        }
+    }
+    
+    
+    Arena_EndTempMemory(Platform->transient_arena, marker);
+    
+    if (file_handle != INVALID_HANDLE_VALUE)
+    {
+        u32 file_size = GetFileSize(file_handle, 0);
+        
+        file_contents->size = file_size;
+        file_contents->data = Arena_PushSize(arena, file_size + 1, ALIGNOF(WCHAR));
+        
+        DWORD bytes_read;
+        if (ReadFile(file_handle, file_contents->data, (u32)file_size, &bytes_read, 0) && bytes_read == file_size)
+        {
+            file_contents->data[file_contents->size] = 0;
+            
+            succeeded = true;
+        }
+    }
+    
+    return succeeded;
+}
+
+internal bool
 Win32_GetFileTimestamp(LPWSTR path, Win32_File_Timestamp* timestamp)
 {
     bool succeeded = false;
@@ -432,7 +477,8 @@ WinMainCRTStartup()
         .ReserveMemory    = Win32_ReserveMemory,
         .CommitMemory     = Win32_CommitMemory,
         .Print            = Win32_Print,
-        .SwapBuffers      = Win32_SwapBuffers
+        .SwapBuffers      = Win32_SwapBuffers,
+        .ReadEntireFile   = Win32_ReadEntireFile,
     };
     
     Platform = &platform_data;

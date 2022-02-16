@@ -156,10 +156,13 @@ typedef String Path;
 // NOTE: This is just a hack to work around a parsing bug in 4coder
 #define TYPEDEF_FUNC(return_val, name, ...) typedef return_val (*name)(__VA_ARGS__)
 
+struct Memory_Arena;
+
 TYPEDEF_FUNC(void*, platform_reserve_memory, umm size);
 TYPEDEF_FUNC(bool, platform_commit_memory, void* base_pointer, umm size);
 TYPEDEF_FUNC(void, platform_print, char* format, ...);
 TYPEDEF_FUNC(void, platform_swap_buffers);
+TYPEDEF_FUNC(bool, platform_read_entire_file, struct Memory_Arena* arena, String path, String* file_contents);
 
 typedef struct Platform_Data
 {
@@ -170,6 +173,7 @@ typedef struct Platform_Data
     platform_commit_memory CommitMemory;
     platform_print Print;
     platform_swap_buffers SwapBuffers;
+    platform_read_entire_file ReadEntireFile;
     
     u32* image;
     u32 width;
@@ -182,6 +186,7 @@ Platform_Data* Platform;
 
 #include "tr_math.h"
 #include "tr_memory.h"
+#include "tr_targa.h"
 
 typedef struct Platform_Input
 {
