@@ -1,3 +1,5 @@
+#include <immintrin.h>
+
 #define PI32 3.1415926535f
 #define TAU32 6.2831853071f
 #define HALF_PI32 1.5707963267f
@@ -16,7 +18,7 @@ typedef union F64_Bits
 {
     f64 flt;
     u64 bits;
-} F64_Bits;
+} F64_Bits; 
 
 internal inline f32
 F32_Inf()
@@ -40,7 +42,7 @@ internal inline f32
 Sqrt(f32 n)
 {
     // TODO: replace with intrinsic
-    
+#if 1
     f32 acc = n / 2;
     
     for (umm i = 0; i < 5; ++i)
@@ -49,6 +51,9 @@ Sqrt(f32 n)
     }
     
     return acc;
+#else
+    return _mm_cvtss_f32(_mm_sqrt_ss(_mm_load_ss(&n)));
+#endif
 }
 
 internal inline f32
@@ -83,7 +88,7 @@ Sgn(f32 x)
 internal inline bool
 IsNegative(f32 x)
 {
-    return !!((F32_Bits){ .flt = x }.bits & (1 << 31));
+    return (((F32_Bits){ .flt = x }.bits & (1 << 31)) != 0);
 }
 
 internal inline f32
@@ -183,205 +188,205 @@ typedef union M4
     f32 e[16];
 } M4;
 
-internal V2
+internal inline V2
 Vec2(f32 x, f32 y)
 {
     return (V2){x, y};
 }
 
-internal V3
+internal inline V3
 Vec3(f32 x, f32 y, f32 z)
 {
     return (V3){x, y, z};
 }
 
-internal V4
+internal inline V4
 Vec4(f32 x, f32 y, f32 z, f32 w)
 {
     return (V4){x, y, z, w};
 }
 
-internal V2
+internal inline V2
 V2_Add(V2 v0, V2 v1)
 {
     return (V2){v0.x + v1.x, v0.y + v1.y};
 }
 
-internal V3
+internal inline V3
 V3_Add(V3 v0, V3 v1)
 {
     return (V3){v0.x + v1.x, v0.y + v1.y, v0.z + v1.z};
 }
 
-internal V4
+internal inline V4
 V4_Add(V4 v0, V4 v1)
 {
     return (V4){v0.x + v1.x, v0.y + v1.y, v0.z + v1.z, v0.w + v1.w};
 }
 
-internal V2
+internal inline V2
 V2_Sub(V2 v0, V2 v1)
 {
     return (V2){v0.x - v1.x, v0.y - v1.y};
 }
 
-internal V3
+internal inline V3
 V3_Sub(V3 v0, V3 v1)
 {
     return (V3){v0.x - v1.x, v0.y - v1.y, v0.z - v1.z};
 }
 
-internal V4
+internal inline V4
 V4_Sub(V4 v0, V4 v1)
 {
     return (V4){v0.x - v1.x, v0.y - v1.y, v0.z - v1.z, v0.w - v1.w};
 }
 
-internal V2
+internal inline V2
 V2_Neg(V2 v)
 {
     return (V2){-v.x, -v.y};
 }
 
-internal V3
+internal inline V3
 V3_Neg(V3 v)
 {
     return (V3){-v.x, -v.y, -v.z};
 }
 
-internal V4
+internal inline V4
 V4_Neg(V4 v)
 {
     return (V4){-v.x, -v.y, -v.z, -v.w};
 }
 
-internal V4
+internal inline V4
 V4_Conjugate(V4 v)
 {
     return (V4){v.x, -v.y, -v.z, -v.w};
 }
 
-internal V2
+internal inline V2
 V2_Scale(V2 v, f32 n)
 {
     return (V2){v.x * n, v.y * n};
 }
 
-internal V3
+internal inline V3
 V3_Scale(V3 v, f32 n)
 {
     return (V3){v.x * n, v.y * n, v.z * n};
 }
 
-internal V4
+internal inline V4
 V4_Scale(V4 v, f32 n)
 {
     return (V4){v.x * n, v.y * n, v.z * n, v.w * n};
 }
 
-internal f32
+internal inline f32
 V2_LengthSq(V2 v)
 {
     return Squared(v.x) + Squared(v.y);
 }
 
-internal f32
+internal inline f32
 V3_LengthSq(V3 v)
 {
     return Squared(v.x) + Squared(v.y) + Squared(v.z);
 }
 
-internal f32
+internal inline f32
 V4_LengthSq(V4 v)
 {
     return Squared(v.x) + Squared(v.y) + Squared(v.z) + Squared(v.w);
 }
 
-internal f32
+internal inline f32
 V2_Length(V2 v)
 {
     return Sqrt(V2_LengthSq(v));
 }
 
-internal f32
+internal inline f32
 V3_Length(V3 v)
 {
     return Sqrt(V3_LengthSq(v));
 }
 
-internal f32
+internal inline f32
 V4_Length(V4 v)
 {
     return Sqrt(V4_LengthSq(v));
 }
 
-internal V2
+internal inline V2
 V2_Normalize(V2 v)
 {
     return V2_Scale(v, 1 / V2_Length(v));
 }
 
-internal V3
+internal inline V3
 V3_Normalize(V3 v)
 {
     return V3_Scale(v, 1 / V3_Length(v));
 }
 
-internal V4
+internal inline V4
 V4_Normalize(V4 v)
 {
     return V4_Scale(v, 1 / V4_Length(v));
 }
 
-internal V2
+internal inline V2
 V2_Hadamard(V2 v0, V2 v1)
 {
     return (V2){v0.x * v1.x, v0.y * v1.y};
 }
 
-internal V3
+internal inline V3
 V3_Hadamard(V3 v0, V3 v1)
 {
     return (V3){v0.x * v1.x, v0.y * v1.y, v0.z * v1.z};
 }
 
-internal V4
+internal inline V4
 V4_Hadamard(V4 v0, V4 v1)
 {
     return (V4){v0.x * v1.x, v0.y * v1.y, v0.z * v1.z, v0.w * v1.w};
 }
 
-internal f32
+internal inline f32
 V2_Inner(V2 v0, V2 v1)
 {
     return v0.x * v1.x + v0.y * v1.y;
 }
 
-internal f32
+internal inline f32
 V3_Inner(V3 v0, V3 v1)
 {
     return v0.x * v1.x + v0.y * v1.y + v0.z * v1.z;
 }
 
-internal f32
+internal inline f32
 V4_Inner(V4 v0, V4 v1)
 {
     return v0.x * v1.x + v0.y * v1.y + v0.z * v1.z + v0.w * v1.w;
 }
 
-internal M2
+internal inline M2
 V2_Outer(V2 v0, V2 v1)
 {
     return (M2){.i = V2_Scale(v0, v1.x), .j = V2_Scale(v0, v1.y)};
 }
 
-internal M3
+internal inline M3
 V3_Outer(V3 v0, V3 v1)
 {
     return (M3){.i = V3_Scale(v0, v1.x), .j = V3_Scale(v0, v1.y), .k = V3_Scale(v0, v1.z)};
 }
 
-internal M4
+internal inline M4
 V4_Outer(V4 v0, V4 v1)
 {
     return (M4){.i = V4_Scale(v0, v1.x), .j = V4_Scale(v0, v1.y), .k = V4_Scale(v0, v1.z), .w = V4_Scale(v0, v1.w)};
@@ -409,115 +414,115 @@ V3_ReflectRay(V3 ray, V3 plane_normal)
     return V3_Sub(ray, V3_Scale(plane_normal, 2 * V3_Inner(ray, plane_normal)));
 }
 
-internal M2
+internal inline M2
 Mat2(V2 i, V2 j)
 {
     return (M2){.i = i, .j = j};
 }
 
-internal M3
+internal inline M3
 Mat3(V3 i, V3 j, V3 k)
 {
     return (M3){.i = i, .j = j, .k = k};
 }
 
-internal M4
+internal inline M4
 Mat4(V4 i, V4 j, V4 k, V4 w)
 {
     return (M4){.i = i, .j = j, .k = k, .w = w};
 }
 
-internal M2
+internal inline M2
 M2_Add(M2 m0, M2 m1)
 {
     return (M2){.i = V2_Add(m0.i, m1.i), .j = V2_Add(m0.j, m1.j)};
 }
 
-internal M3
+internal inline M3
 M3_Add(M3 m0, M3 m1)
 {
     return (M3){.i = V3_Add(m0.i, m1.i), .j = V3_Add(m0.j, m1.j), .k = V3_Add(m0.k, m1.k)};
 }
 
-internal M4
+internal inline M4
 M4_Add(M4 m0, M4 m1)
 {
     return (M4){.i = V4_Add(m0.i, m1.i), .j = V4_Add(m0.j, m1.j), .k = V4_Add(m0.k, m1.k), .w = V4_Add(m0.w, m1.w)};
 }
 
-internal M2
+internal inline M2
 M2_Sub(M2 m0, M2 m1)
 {
     return (M2){.i = V2_Sub(m0.i, m1.i), .j = V2_Sub(m0.j, m1.j)};
 }
 
-internal M3
+internal inline M3
 M3_Sub(M3 m0, M3 m1)
 {
     return (M3){.i = V3_Sub(m0.i, m1.i), .j = V3_Sub(m0.j, m1.j), .k = V3_Sub(m0.k, m1.k)};
 }
 
-internal M4
+internal inline M4
 M4_Sub(M4 m0, M4 m1)
 {
     return (M4){.i = V4_Sub(m0.i, m1.i), .j = V4_Sub(m0.j, m1.j), .k = V4_Sub(m0.k, m1.k), .w = V4_Sub(m0.w, m1.w)};
 }
 
-internal M2
+internal inline M2
 M2_Neg(M2 m)
 {
     return (M2){.i = V2_Neg(m.i), .j = V2_Neg(m.j)};
 }
 
-internal M3
+internal inline M3
 M3_Neg(M3 m)
 {
     return (M3){.i = V3_Neg(m.i), .j = V3_Neg(m.j), .k = V3_Neg(m.k)};
 }
 
-internal M4
+internal inline M4
 M4_Neg(M4 m)
 {
     return (M4){.i = V4_Neg(m.i), .j = V4_Neg(m.j), .k = V4_Neg(m.k), .w = V4_Neg(m.w)};
 }
 
-internal M2
+internal inline M2
 M2_Scale(M2 m, f32 n)
 {
     return (M2){.i = V2_Scale(m.i, n), .j = V2_Scale(m.j, n)};
 }
 
-internal M3
+internal inline M3
 M3_Scale(M3 m, f32 n)
 {
     return (M3){.i = V3_Scale(m.i, n), .j = V3_Scale(m.j, n), .k = V3_Scale(m.k, n)};
 }
 
-internal M4
+internal inline M4
 M4_Scale(M4 m, f32 n)
 {
     return (M4){.i = V4_Scale(m.i, n), .j = V4_Scale(m.j, n), .k = V4_Scale(m.k, n), .w = V4_Scale(m.w, n)};
 }
 
-internal V2
+internal inline V2
 M2_Row(M2 m, umm r)
 {
     return (V2){m.e[r], m.e[r + 2]};
 }
 
-internal V3
+internal inline V3
 M3_Row(M3 m, umm r)
 {
     return (V3){m.e[r], m.e[r + 3], m.e[r + 6]};
 }
 
-internal V4
+internal inline V4
 M4_Row(M4 m, umm r)
 {
     return (V4){m.e[r], m.e[r + 4], m.e[r + 8], m.e[r + 12]};
 }
 
-internal M2
+internal inline M2
 M2_Transpose(M2 m)
 {
     V2 r0 = M2_Row(m, 0);
@@ -526,7 +531,7 @@ M2_Transpose(M2 m)
     return (M2){.i = r0, .j = r1};
 }
 
-internal M3
+internal inline M3
 M3_Transpose(M3 m)
 {
     V3 r0 = M3_Row(m, 0);
@@ -536,7 +541,7 @@ M3_Transpose(M3 m)
     return (M3){.i = r0, .j = r1, .k = r2};
 }
 
-internal M4
+internal inline M4
 M4_Transpose(M4 m)
 {
     V4 r0 = M4_Row(m, 0);
@@ -547,7 +552,7 @@ M4_Transpose(M4 m)
     return (M4){.i = r0, .j = r1, .k = r2, .w = r3};
 }
 
-internal M2
+internal inline M2
 M2_Mul(M2 m0, M2 m1)
 {
     V2 r0 = M2_Row(m0, 0);
@@ -560,7 +565,7 @@ M2_Mul(M2 m0, M2 m1)
     return result;
 }
 
-internal M3
+internal inline M3
 M3_Mul(M3 m0, M3 m1)
 {
     V3 r0 = M3_Row(m0, 0);
@@ -575,7 +580,7 @@ M3_Mul(M3 m0, M3 m1)
     return result;
 }
 
-internal M4
+internal inline M4
 M4_Mul(M4 m0, M4 m1)
 {
     V4 r0 = M4_Row(m0, 0);
@@ -592,7 +597,7 @@ M4_Mul(M4 m0, M4 m1)
     return result;
 }
 
-internal M2
+internal inline M2
 M2_Hadamard(M2 m0, M2 m1)
 {
     return (M2){
@@ -600,7 +605,7 @@ M2_Hadamard(M2 m0, M2 m1)
         .j = V2_Hadamard(m0.j, m1.j)};
 }
 
-internal M3
+internal inline M3
 M3_Hadamard(M3 m0, M3 m1)
 {
     return (M3){
@@ -610,7 +615,7 @@ M3_Hadamard(M3 m0, M3 m1)
     };
 }
 
-internal M4
+internal inline M4
 M4_Hadamard(M4 m0, M4 m1)
 {
     return (M4){
@@ -621,7 +626,7 @@ M4_Hadamard(M4 m0, M4 m1)
     };
 }
 
-internal V2
+internal inline V2
 M2_Transform(M2 m, V2 v)
 {
     return (V2){
@@ -630,7 +635,7 @@ M2_Transform(M2 m, V2 v)
     };
 }
 
-internal V3
+internal inline V3
 M3_Transform(M3 m, V3 v)
 {
     return (V3){
@@ -640,7 +645,7 @@ M3_Transform(M3 m, V3 v)
     };
 }
 
-internal V4
+internal inline V4
 M4_Transform(M4 m, V4 v)
 {
     return (V4){
