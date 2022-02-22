@@ -1,5 +1,7 @@
 #include "tr_platform.h"
 
+static f32 time = 0;
+
 enum ENTITY_KIND
 {
     Entity_Spheroid,
@@ -47,6 +49,7 @@ typedef struct Scene
     Entity* entities;
     u32 entity_count;
     V3 sun_dir;
+    f32 ambient;
     u32* skybox_data;
     u32 skybox_width;
     u32 skybox_height;
@@ -84,9 +87,10 @@ CastRay(Scene* scene, Hit_Data* ignored_hit, V3 origin, V3 dir)
                 {
                     f32 t = depth - Sqrt(par_t);
                     
-                    hit         = V3_Scale(dir, t);
+                    V3 t_dir = V3_Scale(dir, t);
+                    hit         = V3_Add(origin, t_dir);
                     hit_dist_sq = V3_LengthSq(hit);
-                    normal      = V3_Normalize(V3_Sub(hit, pos));
+                    normal      = V3_Normalize(V3_Sub(t_dir, pos));
                 }
             } break;
             
@@ -105,7 +109,7 @@ CastRay(Scene* scene, Hit_Data* ignored_hit, V3 origin, V3 dir)
                 
                 if (par_t != 0 && t > 0)
                 {
-                    hit         = V3_Scale(dir, t);
+                    hit         = V3_Add(origin, V3_Scale(dir, t));
                     hit_dist_sq = V3_LengthSq(hit);
                 }
             } break;
@@ -134,25 +138,99 @@ ComputeLight(Scene* scene, Hit_Data* ignored_hit, V3 pos, V3 ray, V3 energy)
     
     if (hit_data.entity == 0)
     {
-        u32 y = (u32)((f32)(scene->skybox_height - 1)*Abs(V3_Inner(ray, Vec3(0, 1, 0))));
-        u32 x = (u32)(5.0f*scene->skybox_width*(u32)Abs((1 + V3_Inner(ray, Vec3(0, 1, 0))) / 2)) % scene->skybox_width;
+        f32 speed = 1;
+        f32 a = time * speed;
+        f32 cos_a = Cos(a);
+        f32 sin_a = Sin(a);
+        V3 v = {
+            .x = ray.x * cos_a - ray.z * sin_a,
+            .y = ray.y,
+            .z = ray.x * sin_a + ray.z * cos_a,
+        };
+        
+        V2 p     = {0};
+        umm cell = 0;
+        
+        f32 min_dist_sq = 2*2;
+        f32 normals[]   = {1, 0, 0};
+        umm cells[]     = {
+            5, 1, 6,
+            7, 9, 4
+        };
+        
+        umm xs[]  = {2, 2, 0};
+        umm ys[]  = {1, 0, 1};
+        imm sgn[] = {1, -1, 1};
+        
+        for (umm i = 0; i < 3; ++i)
+        {
+            V3 normal = Vec3(-normals[i], -normals[(i + 2) % 3], -normals[(i + 1) % 3]);
+            
+            f32 par_t = V3_Inner(v, normal);
+            f32 t     = V3_Inner(Vec3(normals[i], normals[(i + 2) % 3], -normals[(i + 1) % 3]), normal) / par_t;
+            
+            if (par_t != 0)
+            {
+                V3 hit          = V3_Scale(v, t);
+                f32 hit_dist_sq = V3_LengthSq(hit);
+                
+                if (hit_dist_sq < min_dist_sq)
+                {
+                    cell = cells[i + (t > 0 ? 0 : 3)];
+                    p = (V2){-t*(cell == 9 ? -1 : 1)*v.e[xs[i]], -sgn[i]*ABS(t)*v.e[ys[i]]};
+                    
+                    min_dist_sq = hit_dist_sq;
+                    
+                }
+            }
+        }
+        
+        p.x = (p.x + 1) / 2;
+        p.y = (p.y + 1) / 2;
+        
+#if 1
+        umm cell_size = scene->skybox_width / 4;
+        
+        umm x = (umm)(((cell % 4) + p.x) * cell_size);
+        umm y = (umm)(((cell / 4) + p.y) * cell_size);
         light = V3_FromRGBU32(scene->skybox_data[y * scene->skybox_width + x]);
+#else
+        u32 colors[] = {
+            0x000000,
+            0x0000FF, // 1
+            0x000000,
+            0x000000,
+            0x00FF00, // 4
+            0xFF0000, // 5
+            0x00FFFF, // 6
+            0xFFFF00, // 7
+            0x000000,
+            0xFF00FF, // 9
+            0x000000,
+            0x000000,
+            0x000000,
+        };
+        
+        //light = V3_FromRGBU32(colors[cell]);
+        light = V3_Scale(V3_FromRGBU32(colors[cell]), p.x*p.y);
+#endif
+        
     }
-    
     else
     {
-        //Hit_Data sun_data = CastRay(scene, &hit_data, hit_data.point, scene->sun_dir);
+        /*Hit_Data shadow_data = CastRay(scene, &hit_data, hit_data.point, scene->sun_dir);
         
-        //f32 sun_light = (sun_data.entity == 0 ? V3_Inner(hit_data.normal, scene->sun_dir) : 0);
-        //sun_light = MAX(sun_light, 0);
+        f32 sun_light = 0;
+        if (shadow_data.entity == 0)
+        {
+            sun_light = V3_Inner(hit_data.normal, scene->sun_dir);
+        }
         
-        //V3 albedo = V3_FromRGBU32(hit_data.entity->color);
+        sun_light = MAX(scene->ambient, sun_light);
         
-        //f32 light_strength = 0.2f + sun_light;
-        //light = V3_Scale(albedo, MIN(MAX(light_strength, 0.2f), 1));
-        
+        light = V3_Scale(V3_FromRGBU32(hit_data.entity->color), sun_light);*/
         V3 reflected_ray = V3_Normalize(V3_Add(ray, V3_Scale(hit_data.normal, -2*V3_Inner(hit_data.normal, ray))));
-        light = ComputeLight(scene, &hit_data, hit_data.point, reflected_ray, V3_Hadamard(energy, Vec3(0.8f, 0.8f, 0.9f)));
+        light = ComputeLight(scene, &hit_data, hit_data.point, reflected_ray, V3_Hadamard(energy, Vec3(0.7f, 0.7f, 0.7f)));
     }
     
     return V3_Hadamard(light, energy);
@@ -173,21 +251,9 @@ TraceScanline(Camera* camera, Scene* scene, V3 cell_origin, V2 cell_dim, umm sta
                 cell_origin.y - ((cy + 0.5f) * cell_dim.y), cell_origin.z
             };
             
-            V3 offsets[4] = {
-                { Sin((f32)cx)    * cell_dim.x / 3, Cos((f32)cy*cy) * cell_dim.y / 3, 0 },
-                { Sin((f32)cy)    * cell_dim.x / 3, Cos((f32)cx*cx) * cell_dim.y / 3, 0 },
-                { Sin((f32)cx*cx) * cell_dim.x / 3, Cos((f32)cy)    * cell_dim.y / 3, 0 },
-                { Sin((f32)cy*cy) * cell_dim.x / 3, Cos((f32)cx)    * cell_dim.y / 3, 0 },
-            };
+            V3 light = ComputeLight(scene, 0, camera->pos, V3_Normalize(ray_dir), (V3){1,1,1});
             
-            V3 color = {0};
-            
-            for (umm i = 0; i < 4; ++i)
-            {
-                color = V3_Add(color, ComputeLight(scene, 0, camera->pos, V3_Normalize(V3_Add(ray_dir, offsets[i])), (V3){1,1,1}));
-            }
-            
-            color = V3_Scale(color, 0.25f);
+            V3 color = light;
             
             u32 rgb = V3_ToRGBU32(color);
             for (umm j = 0; j < fragment_height; ++j)
@@ -234,11 +300,11 @@ global Camera MainCamera = {
 };
 
 global Entity Entities[] = {
-    {
+    /*{
         .kind  = Entity_Plane,
         .pos   = {0, -1.2f, 0},
         .color = 0x00212121,
-    },
+    },*/
     
     {
         .kind  = Entity_Spheroid,
@@ -286,6 +352,7 @@ global Entity Entities[] = {
 global Scene MainScene = {
     .entities      = Entities,
     .entity_count  = ARRAY_SIZE(Entities),
+    .ambient       = 0.2f,
 };
 
 void
@@ -333,11 +400,15 @@ Tick(Platform_Data* platform_data, Platform_Input input)
     
     if (input.dir.x != 0 || input.dir.y != 0)
     {
-        MainCamera.pos.xy = V2_Add(MainCamera.pos.xy, V2_Scale(input.dir, Platform->dt));
+        MainCamera.pos.xy = V2_Add(MainCamera.pos.xy, V2_Scale(input.dir, input.dt));
         
         MainCamera.fragment_size = 64;
         should_rerender = true;
     }
+    
+    time += input.dt;
+    MainCamera.fragment_size = 4;
+    should_rerender = true;
     
     if (should_rerender)
     {

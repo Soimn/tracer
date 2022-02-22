@@ -620,13 +620,12 @@ WinMainCRTStartup()
                         else DispatchMessage(&msg);
                     }
                     
-                    Platform->dt = 1 / 60.0f;
-                    
                     Platform_Input input = {
                         .dir = {
                             .x = (f32)(-((GetKeyState(VK_LEFT) & (1 << 15)) != 0) + ((GetKeyState(VK_RIGHT) & (1 << 15)) != 0)),
                             .y = (f32)(-((GetKeyState(VK_DOWN) & (1 << 15)) != 0) + ((GetKeyState(VK_UP)    & (1 << 15)) != 0)),
                         },
+                        .dt = 1 / 60.0f,
                     };
                     
                     u32* image = Platform->image;

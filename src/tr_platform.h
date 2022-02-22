@@ -8,6 +8,48 @@
 #error 32 bit mode is not supported yet
 #endif
 
+// NOTE: required to remove CRT
+void* memset(void* ptr, int value, unsigned __int64 size);
+void* memcpy(void* rdst, const void* rsrc, unsigned __int64 count);
+
+#pragma function(memset)
+#pragma function(memcpy)
+
+void*
+memset(void* ptr, int value, unsigned __int64 size)
+{
+    unsigned __int8* bptr = ptr;
+    unsigned __int8 val   = (unsigned __int8)value;
+    
+    for (unsigned __int64 i = 0; i < size; ++i)
+    {
+        *bptr++ = val;
+    }
+    
+    return ptr;
+}
+
+void*
+memcpy(void* rdst, const void* rsrc, unsigned __int64 count)
+{
+    unsigned __int8* dst = (unsigned __int8*)rdst;
+    const unsigned __int8* src = (const unsigned __int8*)rsrc;
+    while (count--)
+    {
+        *dst++ = *src++;
+    }
+    return dst;
+}
+
+
+int _fltused;
+
+int __stdcall
+_DllMainCRTStartup(void* instance, unsigned __int32 reason, void* reserved)
+{
+    return 1;
+}
+
 typedef signed __int8  i8;
 typedef signed __int16 i16;
 typedef signed __int32 i32;
@@ -20,48 +62,6 @@ typedef unsigned __int64 u64;
 
 typedef u64 umm;
 typedef i64 imm;
-
-// NOTE: required to remove CRT
-void* memset(void* ptr, int value, umm size);
-void* memcpy(void* rdst, const void* rsrc, u64 count);
-
-#pragma function(memset)
-#pragma function(memcpy)
-
-void*
-memset(void* ptr, int value, umm size)
-{
-    u8* bptr = ptr;
-    u8 val   = (u8)value;
-    
-    for (umm i = 0; i < size; ++i)
-    {
-        *bptr++ = val;
-    }
-    
-    return ptr;
-}
-
-void*
-memcpy(void* rdst, const void* rsrc, u64 count)
-{
-    u8* dst = (u8*)rdst;
-    const u8* src = (const u8*)rsrc;
-    while (count--)
-    {
-        *dst++ = *src++;
-    }
-    return dst;
-}
-
-
-int _fltused;
-
-int __stdcall
-_DllMainCRTStartup(void* instance, u32 reason, void* reserved)
-{
-    return 1;
-}
 
 typedef u64 umm;
 typedef i64 imm;
@@ -178,8 +178,6 @@ typedef struct Platform_Data
     u32* image;
     u32 width;
     u32 height;
-    
-    f32 dt;
 } Platform_Data;
 
 Platform_Data* Platform;
@@ -191,6 +189,7 @@ Platform_Data* Platform;
 typedef struct Platform_Input
 {
     V2 dir;
+    f32 dt;
 } Platform_Input;
 
 TYPEDEF_FUNC(void, platform_tick, Platform_Data* platform_data, Platform_Input input);

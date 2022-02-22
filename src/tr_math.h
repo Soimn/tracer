@@ -2,6 +2,9 @@
 #define TAU32 6.2831853071f
 #define HALF_PI32 1.5707963267f
 #define E32 2.7182818284f
+#define ONE_OVER_ROOT2 0.70710678118654752f
+#define ROOT2          1.41421356237309504f
+#define ROOT_THIRD     0.57735026918962576f
 
 typedef union F32_Bits
 {
@@ -140,6 +143,8 @@ typedef union  V3
     
     struct { V2 rg; f32 _2; };
     struct { f32 _3; V2 gb; };
+    
+    f32 e[3];
 } V3;
 
 typedef union  V4
