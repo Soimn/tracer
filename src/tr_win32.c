@@ -415,7 +415,7 @@ WindowProc(HWND window_handle, UINT message, WPARAM wparam, LPARAM lparam)
     LRESULT result = 0;
     
     if (message == WM_QUIT || message == WM_CLOSE) PostQuitMessage(0);
-    else if (message == WM_CREATE || message == WM_SIZE)
+    else if (message == WM_CREATE)
     {
         RECT window_rect;
         GetWindowRect(window_handle, &window_rect);
@@ -498,8 +498,12 @@ WinMainCRTStartup()
     if (!RegisterClassW(&window_class)) Win32_Print("Failed to register window class\n");
     else
     {
-        window_handle = CreateWindowExW(0, L"Tracer", L"Tracer", WS_OVERLAPPEDWINDOW,
-                                        CW_USEDEFAULT, CW_USEDEFAULT, 200, 200, // CW_USEDEFAULT, CW_USEDEFAULT,
+        int screen_width  = GetSystemMetrics(SM_CXSCREEN);
+        int screen_height = GetSystemMetrics(SM_CYSCREEN);
+        
+        window_handle = CreateWindowExW(0, L"Tracer", L"Tracer", WS_POPUP,
+                                        CW_USEDEFAULT, CW_USEDEFAULT,
+                                        screen_width, screen_height,
                                         0, 0, instance, 0);
         
         if (window_handle == INVALID_HANDLE_VALUE) Win32_Print("Failed to create window\n");

@@ -178,6 +178,8 @@ typedef struct Platform_Data
     u32* image;
     u32 width;
     u32 height;
+    
+    void* user_pointer;
 } Platform_Data;
 
 Platform_Data* Platform;

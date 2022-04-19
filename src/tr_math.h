@@ -42,7 +42,7 @@ internal inline f32
 Sqrt(f32 n)
 {
     // TODO: replace with intrinsic
-#if 1
+#if 0
     f32 acc = n / 2;
     
     for (umm i = 0; i < 5; ++i)

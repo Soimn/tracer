@@ -1,454 +1,515 @@
 #include "tr_platform.h"
 
-enum ENTITY_KIND
+// Random number generator yoinked from https://iquilezles.org/www/articles/sfrand/sfrand.htm
+float frand( int *seed )
 {
-    Entity_Spheroid,
-    Entity_Cuboid,
+    union
+    {
+        float fres;
+        unsigned int ires;
+    } f;
+    
+    seed[0] *= 16807;
+    f.ires = ((((unsigned int)seed[0])>>9 ) | 0x3f800000);
+    return f.fres - 1.0f;
+}
+
+V3
+RandomPointInUnitSphere(int* seed)
+{
+	V3 p = {1, 1, 1};
+	while (p.x*p.x + p.y*p.y + p.z*p.z> 1) p = (V3){ 2*frand(seed) - 1, 2*frand(seed) - 1, 2*frand(seed) - 1 };
+    
+	return p;
+}
+
+typedef enum ENTITY_KIND
+{
+    Entity_Sphere,
     Entity_Plane,
-};
+} ENTITY_KIND;
 
 typedef struct Entity
 {
-    Enum8(ENTITY_KIND) kind;
-    
+    ENTITY_KIND kind;
     V3 pos;
-    V4 rot;
-    u32 color;
     
     union
     {
         struct
         {
-            f32 radius;
-        } spheroid;
+            f32 r;
+        } sphere;
         
         struct
         {
-            V2 dim;
-        } cuboid;
+            V3 normal;
+        } plane;
     };
 } Entity;
 
-typedef struct Camera
-{
-    u32* data;
-    u32 width;
-    u32 height;
-    u32 target_width;
-    u32 target_height;
-    u32 fragment_size;
-    V3 pos;
-    V4 rot;
-    f32 fov;
-} Camera;
-
 typedef struct Scene
 {
-    Entity* entities;
-    u32 entity_count;
-    V3 sun_dir;
-    f32 ambient;
-    u32* skybox_data;
+    int seed;
+    
     u32 skybox_width;
     u32 skybox_height;
+    u32* skybox_data;
+    
+    u32 entity_count;
+    Entity entities[];
 } Scene;
 
-typedef struct Hit_Data
+typedef struct Ray_Hit
 {
+    Entity* entity;
     V3 point;
     V3 normal;
-    Entity* entity;
-} Hit_Data;
+    bool backface;
+} Ray_Hit;
 
-internal Hit_Data
-CastRay(Scene* scene, Hit_Data* ignored_hit, V3 origin, V3 dir)
+Ray_Hit
+Raycast(Scene* scene, V3 origin, V3 ray, f32 epsilon)
 {
-    Hit_Data hit_data = {0};
+    Ray_Hit hit = {0};
     
-    f32 closest_hit_dist_sq = F32_Inf();
+    f32 min_dist_sq = F32_Inf();
     for (umm i = 0; i < scene->entity_count; ++i)
     {
-        V3 pos          = V3_Sub(scene->entities[i].pos, origin);
-        V3 hit          = {0};
-        V3 normal       = {0};
-        f32 hit_dist_sq = F32_Inf();
+        Entity* entity = &scene->entities[i];
         
-        switch (scene->entities[i].kind)
+        f32 t         = -1;
+        V3 point      = {0};
+        V3 normal     = {0};
+        f32 dist_sq   = F32_Inf();
+        bool backface = false;
+        
+        switch (entity->kind)
         {
-            case Entity_Spheroid:
+            case Entity_Sphere:
             {
-                // TODO: handle oblate spheroids
-                f32 depth = V3_Inner(pos, dir);
-                f32 par_t = Squared(depth) - V3_Inner(pos, pos) + Squared(scene->entities[i].spheroid.radius);
+                V3 p_to_o        = V3_Sub(origin, entity->pos);
+                f32 b            = V3_Inner(ray, p_to_o);
+                f32 discriminant = Squared(b) - V3_Inner(p_to_o, p_to_o) + Squared(entity->sphere.r);
                 
-                if (depth > 0 && par_t >= 0)
+                if (discriminant <= 0) t = -1;
+                else
                 {
-                    f32 t = depth - Sqrt(par_t);
+                    f32 t_p = -b + Sqrt(discriminant);
+                    f32 t_m = -b - Sqrt(discriminant);
                     
-                    V3 t_dir = V3_Scale(dir, t);
-                    hit         = V3_Add(origin, t_dir);
-                    hit_dist_sq = V3_LengthSq(hit);
-                    normal      = V3_Normalize(V3_Sub(t_dir, pos));
+                    if (t_m < epsilon)
+                    {
+                        t = t_p;
+                        V3 scaled_ray = V3_Scale(ray, t);
+                        point         = V3_Add(origin, scaled_ray);
+                        dist_sq       = V3_LengthSq(scaled_ray);
+                        normal        = V3_Sub(entity->pos, point);
+                        backface      = true;
+                    }
+                    else
+                    {
+                        t = t_m;
+                        V3 scaled_ray = V3_Scale(ray, t);
+                        point         = V3_Add(origin, scaled_ray);
+                        normal        = V3_Sub(point, entity->pos);
+                        dist_sq       = V3_LengthSq(scaled_ray);
+                        backface      = false;
+                    }
+                    
+                    // HACK
+                    backface = (backface ^ (entity->sphere.r < 0));
                 }
-            } break;
-            
-            case Entity_Cuboid:
-            {
-                NOT_IMPLEMENTED;
-                
             } break;
             
             case Entity_Plane:
             {
-                normal = Vec3(0, 1, 0); // TODO: rotate normal
+                f32 dividend = V3_Inner(V3_Sub(entity->pos, origin), entity->plane.normal);
+                f32 divisor  = V3_Inner(ray, entity->plane.normal);
                 
-                f32 par_t = V3_Inner(dir, normal);
-                f32 t     = V3_Inner(pos, normal) / par_t;
-                
-                if (par_t != 0 && t > 0)
+                if (divisor == 0) t = -1;
+                else
                 {
-                    hit         = V3_Add(origin, V3_Scale(dir, t));
-                    hit_dist_sq = V3_LengthSq(hit);
+                    t = dividend / divisor;
+                    V3 scaled_ray = V3_Scale(ray, t);
+                    point         = V3_Add(origin, scaled_ray);
+                    dist_sq       = V3_LengthSq(scaled_ray);
+                    
+                    if (divisor > 0)
+                    {
+                        normal   = V3_Neg(entity->plane.normal);
+                        backface = true;
+                    }
+                    else
+                    {
+                        normal   = entity->plane.normal;
+                        backface = false;
+                    }
                 }
             } break;
             
             INVALID_DEFAULT_CASE;
         }
         
-        if (hit_dist_sq < closest_hit_dist_sq && (ignored_hit == 0 || &scene->entities[i] != ignored_hit->entity))
+        if (t > epsilon && dist_sq < min_dist_sq)
         {
-            hit_data.entity     = &scene->entities[i];
-            hit_data.point      = hit;
-            hit_data.normal     = normal;
-            closest_hit_dist_sq = hit_dist_sq;
+            min_dist_sq  = dist_sq;
+            hit.entity   = entity;
+            hit.point    = point;
+            hit.normal   = V3_Normalize(normal);
+            hit.backface = backface;
         }
     }
     
-    return hit_data;
+    return hit;
 }
 
-internal V3
-ComputeLight(Scene* scene, Hit_Data* ignored_hit, V3 pos, V3 ray, V3 energy)
+bool
+Lambertian(int* seed, f32 epsilon, V3 normal, V3* scattered_ray, V3* attenuation)
 {
-    V3 light = {0};
+    *scattered_ray = V3_Normalize(V3_Add(normal, V3_Normalize(RandomPointInUnitSphere(seed))));
+    if (Abs(scattered_ray->x) < epsilon && Abs(scattered_ray->y) < epsilon && Abs(scattered_ray->z) < epsilon) *scattered_ray = normal;
+    *attenuation = (V3){ 0.5f, 0.5f, 0.5f };
+    return true;
+}
+
+bool
+Reflective(int* seed, f32 epsilon, V3 normal, V3 ray, f32 fuzz, V3* scattered_ray, V3* attenuation)
+{
+    // TODO: internal reflection?
+    *scattered_ray = V3_Normalize(V3_Add(V3_Add(ray, V3_Scale(normal, -2*V3_Inner(ray, normal))),
+                                         V3_Scale(V3_Normalize(RandomPointInUnitSphere(seed)), fuzz)));
+    *attenuation = (V3){ 0.5f, 0.5f, 0.5f };
+    return (V3_Inner(normal, *scattered_ray) > 0);
+}
+
+bool
+Dielectric(int* seed, f32 epsilon, V3 normal, V3 ray, f32 fuzz, bool backface, V3* scattered_ray, V3* attenuation)
+{
+    f32 refraction_ratio = (backface ? 1.5f : 1 / 1.5f);
     
-    Hit_Data hit_data = CastRay(scene, ignored_hit, pos, ray);
+    f32 cos_theta = -V3_Inner(ray, normal);
     
-    if (hit_data.entity == 0)
+    f32 schlick = Squared((1 - refraction_ratio) / (1 + refraction_ratio));
+    schlick += (1 - schlick) * Squared(Squared(1 - cos_theta))*(1 - cos_theta);
+    
+    if (refraction_ratio * Sqrt(1 - Squared(cos_theta)) > 1 || schlick > frand(seed))
     {
-        V3 v = ray;
-        
-        V2 p     = {0};
-        umm cell = 0;
-        
-        f32 min_dist_sq = 2*2;
-        
-        if (v.x != 0)
-        {
-            f32 t = 1 / v.x;
-            
-            V3 hit          = V3_Scale(v, t);
-            f32 hit_dist_sq = V3_LengthSq(hit);
-            
-            if (hit_dist_sq < min_dist_sq)
-            {
-                cell = (t > 0 ? 5 : 7);
-                p = (V2){-t*v.z, -ABS(t)*v.y};
-                
-                min_dist_sq = hit_dist_sq;
-                
-            }
-        }
-        
-        if (v.y != 0)
-        {
-            f32 t = 1 / v.y;
-            
-            V3 hit          = V3_Scale(v, t);
-            f32 hit_dist_sq = V3_LengthSq(hit);
-            
-            if (hit_dist_sq < min_dist_sq)
-            {
-                cell = (t > 0 ? 1 : 9);
-                p = (V2){-ABS(t)*v.z, t*v.x};
-                
-                min_dist_sq = hit_dist_sq;
-                
-            }
-        }
-        
-        if (v.z != 0)
-        {
-            f32 t = -1 / v.z;
-            
-            V3 hit          = V3_Scale(v, t);
-            f32 hit_dist_sq = V3_LengthSq(hit);
-            
-            if (hit_dist_sq < min_dist_sq)
-            {
-                cell = (t > 0 ? 6 : 4);
-                p = (V2){-t*v.x, -ABS(t)*v.y};
-                
-                min_dist_sq = hit_dist_sq;
-                
-            }
-        }
-        
-        p.x = (p.x + 1) / 2;
-        p.y = (p.y + 1) / 2;
-        
-#if 0
-        umm cell_size = scene->skybox_width / 4;
-        
-        umm cell_x = (cell % 4) * cell_size;
-        umm cell_y = (cell / 4) * cell_size;
-        
-        umm x = MIN(MAX(0, (umm)(p.x*cell_size)), cell_size - 1);
-        umm y = MIN(MAX(0, (umm)(p.y*cell_size)), cell_size - 1);
-        
-        light = V3_FromRGBU32(scene->skybox_data[(cell_y + y) * scene->skybox_width + (cell_x + x)]);
-#else
-        u32 colors[] = {
-            0xFF00FF,
-            0x0000FF, // 1
-            0xFF00FF,
-            0xFF00FF,
-            0x00FF00, // 4
-            0xFF0000, // 5
-            0x00FFFF, // 6
-            0xFFFF00, // 7
-            0xFF00FF,
-            0xFFFFFF, // 9
-            0xFF00FF,
-            0xFF00FF,
-            0xFF00FF,
-        };
-        
-        light = V3_Scale(V3_FromRGBU32(colors[cell]), p.x*p.y);
-#endif
-        
+        *scattered_ray = V3_Normalize(V3_Add(V3_Add(ray, V3_Scale(normal, -2*V3_Inner(ray, normal))),
+                                             V3_Scale(V3_Normalize(RandomPointInUnitSphere(seed)), fuzz)));
     }
     else
     {
-#if 1
-#if 0
-        Hit_Data shadow_data = CastRay(scene, &hit_data, hit_data.point, scene->sun_dir);
+        V3 perpendicular = V3_Scale(V3_Add(ray, V3_Scale(normal, cos_theta)), refraction_ratio);
+        V3 parallel      = V3_Scale(normal, -Sqrt(Abs(1 - V3_LengthSq(perpendicular))));
         
-        f32 sun_light = 0;
-        if (shadow_data.entity == 0)
-        {
-            sun_light = V3_Inner(hit_data.normal, scene->sun_dir);
-        }
-        
-        sun_light = MAX(scene->ambient, sun_light);
-        
-        light = V3_Scale(V3_FromRGBU32(hit_data.entity->color), sun_light);
-#else
-        V3 reflected_ray = V3_Normalize(V3_Add(ray, V3_Scale(hit_data.normal, -2*V3_Inner(hit_data.normal, ray))));
-        light = ComputeLight(scene, &hit_data, hit_data.point, reflected_ray, V3_Hadamard(energy, Vec3(0.7f, 0.7f, 0.7f)));
-#endif
-#else
-        Hit_Data shadow_data = CastRay(scene, &hit_data, hit_data.point, scene->sun_dir);
-        
-        f32 sun_light = 0;
-        if (shadow_data.entity == 0)
-        {
-            sun_light = V3_Inner(hit_data.normal, scene->sun_dir);
-        }
-        
-        sun_light = MAX(scene->ambient, sun_light);
-        
-        light = V3_Scale(V3_FromRGBU32(hit_data.entity->color), sun_light);
-        
-        V3 reflected_ray = V3_Normalize(V3_Add(ray, V3_Scale(hit_data.normal, -2*V3_Inner(hit_data.normal, ray))));
-        light = V3_Add(light, ComputeLight(scene, &hit_data, hit_data.point, reflected_ray,
-                                           V3_Hadamard(energy, Vec3(0.03f, 0.03f, 0.03f))));
-#endif
+        *scattered_ray = V3_Normalize(V3_Add(perpendicular, parallel));
     }
     
-    return V3_Hadamard(light, energy);
+    *attenuation = (V3){ 1, 1, 1 };
+    
+    return true;
 }
 
-internal void
-TraceScanline(Camera* camera, Scene* scene, V3 cell_origin, V2 cell_dim, umm start, umm end)
+
+V3
+Raytrace(Scene* scene, V3 origin, V3 ray, imm depth, f32 epsilon)
 {
-    u32 fragment_width  = camera->target_width / camera->width;
-    u32 fragment_height = camera->target_height / camera->height;
+    V3 color = {0};
     
-    for (umm cy = start; cy < end; ++cy)
+    if (depth > 0)
     {
-        for (umm cx = 0; cx < camera->width; ++cx)
+        Ray_Hit hit = Raycast(scene, origin, ray, epsilon);
+        
+        if (hit.entity == 0)
         {
-            V3 ray_dir = {
-                cell_origin.x + (cx + 0.5f) * cell_dim.x,
-                cell_origin.y - ((cy + 0.5f) * cell_dim.y), cell_origin.z
-            };
+#if 1
+            f32 t = (ray.y + 1) / 2;
+            color = V3_Add(V3_Scale((V3){ 1, 1, 1 }, 1 - t),  V3_Scale((V3){ 0.5f, 0.7f, 1.0f }, t));
+#else
+            V3 v = ray;
             
-            V3 light = ComputeLight(scene, 0, camera->pos, V3_Normalize(ray_dir), (V3){1,1,1});
+            V2 p     = {0};
+            umm cell = 0;
             
-            V3 color = Vec3(MIN(light.x, 1), MIN(light.y, 1), MIN(light.z, 1));
+            f32 min_dist_sq = 2*2;
             
-            u32 rgb = V3_ToRGBU32(color);
-            for (umm j = 0; j < fragment_height; ++j)
+            if (v.x != 0)
             {
-                for (umm i = 0; i < fragment_width; ++i)
+                f32 t = 1 / v.x;
+                
+                f32 hit_dist_sq = V3_LengthSq(V3_Scale(v, t));
+                
+                if (hit_dist_sq < min_dist_sq)
                 {
-                    camera->data[(cy * fragment_height + j) * camera->target_width + (cx * fragment_width + i)] = rgb;
+                    cell = (t > 0 ? 5 : 7);
+                    p = (V2){-t*v.z, -ABS(t)*v.y};
+                    
+                    min_dist_sq = hit_dist_sq;
+                    
                 }
             }
+            
+            if (v.y != 0)
+            {
+                f32 t = 1 / v.y;
+                
+                f32 hit_dist_sq = V3_LengthSq(V3_Scale(v, t));
+                
+                if (hit_dist_sq < min_dist_sq)
+                {
+                    cell = (t > 0 ? 1 : 9);
+                    p = (V2){-ABS(t)*v.z, t*v.x};
+                    
+                    min_dist_sq = hit_dist_sq;
+                    
+                }
+            }
+            
+            if (v.z != 0)
+            {
+                f32 t = -1 / v.z;
+                
+                f32 hit_dist_sq = V3_LengthSq(V3_Scale(v, t));
+                
+                if (hit_dist_sq < min_dist_sq)
+                {
+                    cell = (t > 0 ? 6 : 4);
+                    p = (V2){-t*v.x, -ABS(t)*v.y};
+                    
+                    min_dist_sq = hit_dist_sq;
+                    
+                }
+            }
+            
+            p.x = (p.x + 1) / 2;
+            p.y = (p.y + 1) / 2;
+            
+#if 1
+            umm cell_size = scene->skybox_width / 4;
+            
+            umm cell_x = (cell % 4) * cell_size;
+            umm cell_y = (cell / 4) * cell_size;
+            
+            umm x = MIN(MAX(0, (umm)(p.x*cell_size)), cell_size - 1);
+            umm y = MIN(MAX(0, (umm)(p.y*cell_size)), cell_size - 1);
+            
+            color= V3_FromRGBU32(scene->skybox_data[(cell_y + y) * scene->skybox_width + (cell_x + x)]);
+#else
+            u32 colors[] = {
+                0xFF00FF,
+                0x0000FF, // 1
+                0xFF00FF,
+                0xFF00FF,
+                0x00FF00, // 4
+                0xFF0000, // 5
+                0x00FFFF, // 6
+                0xFFFF00, // 7
+                0xFF00FF,
+                0xFFFFFF, // 9
+                0xFF00FF,
+                0xFF00FF,
+                0xFF00FF,
+            };
+            
+            color = V3_Scale(V3_FromRGBU32(colors[cell]), p.x*p.y);
+#endif
+#endif
+        }
+        else
+        {
+            bool should_recurse;
+            V3 scattered_ray;
+            V3 attenuation;
+            if (hit.entity->kind == Entity_Plane)
+            {
+                should_recurse = Reflective(&scene->seed, epsilon, hit.normal, ray, 0, &scattered_ray, &attenuation);
+            }
+            else should_recurse = Dielectric(&scene->seed, epsilon, hit.normal, ray, 0, hit.backface, &scattered_ray, &attenuation);
+            if (should_recurse) color = V3_Hadamard(Raytrace(scene, hit.point, scattered_ray, depth - 1, epsilon), attenuation);
         }
     }
+    
+    return color;
 }
-
-internal void
-TraceScene(Camera* camera, Scene* scene)
-{
-    f32 near_plane_width  = 1;
-    f32 near_plane_height = (f32)camera->height / camera->width;
-    f32 near_plane_depth  = (near_plane_width / 2) / Tan(camera->fov / 2);
-    
-    V3 co = { -near_plane_width / 2, +near_plane_height / 2, +near_plane_depth };
-    V2 cd = { near_plane_width  / camera->width, near_plane_height / camera->height };
-    
-    umm scanline_size = 50;
-    imm scanlines     = camera->height / scanline_size;
-    
-    for (imm scanline = 0; scanline < scanlines - 1; ++scanline)
-    {
-        TraceScanline(camera, scene, co, cd, scanline * scanline_size, (scanline + 1) * scanline_size);
-    }
-    
-    TraceScanline(camera, scene, co, cd, MAX(scanlines - 1, 0) * scanline_size, camera->height);
-}
-
-global Camera MainCamera = {
-    .data          = 0,
-    .width         = 0,
-    .height        = 0,
-    .target_width  = 0,
-    .target_height = 0,
-    .pos           = { 0, 0, 0},
-    .rot           = { 0, 0, 0, 1 },
-    .fov           = HALF_PI32,
-};
-
-global Entity Entities[] = {
-    /*{
-        .kind  = Entity_Plane,
-        .pos   = {0, -1.2f, 0},
-        .color = 0x00212121,
-    },*/
-    
-    {
-        .kind  = Entity_Spheroid,
-        .pos   = {0, 0, 5},
-        .spheroid.radius = 1,
-        .color = 0x00FF0000,
-    },
-    
-    {
-        .kind  = Entity_Spheroid,
-        .pos   = {2.5f, 0, 7},
-        .spheroid.radius = 1,
-        .color = 0x00FF0000,
-    },
-    
-    {
-        .kind  = Entity_Spheroid,
-        .pos   = {-2.5f, 0, 7},
-        .spheroid.radius = 1,
-        .color = 0x00FF0000,
-    },
-    
-    {
-        .kind  = Entity_Spheroid,
-        .pos   = {-1, 4, 8},
-        .spheroid.radius = 1.5f,
-        .color = 0x00128812,
-    },
-    
-    {
-        .kind  = Entity_Spheroid,
-        .pos   = {-10, 3, 20},
-        .spheroid.radius = 2.4f,
-        .color = 0x00331266,
-    },
-    
-    {
-        .kind  = Entity_Spheroid,
-        .pos   = {15, 6, 40},
-        .spheroid.radius = 2.5f,
-        .color = 0x00008866,
-    },
-};
-
-global Scene MainScene = {
-    .entities      = Entities,
-    .entity_count  = ARRAY_SIZE(Entities),
-    .ambient       = 0.2f,
-};
 
 void
 Tick(Platform_Data* platform_data, Platform_Input input)
 {
     Platform = platform_data;
     
-    if (MainScene.skybox_data == 0)
+    Scene* scene = 0;
+    if (Platform->user_pointer == 0)
     {
-        MainScene.sun_dir = V3_Normalize(Vec3(Sin(40), 1, Cos(40)));
+        umm max_entity_count = 128;
+        scene = Arena_PushSize(Platform->persistent_arena, sizeof(Scene) + sizeof(Entity) * max_entity_count, 8);
         
+        scene->seed         = 0x69420;
+#if 0
+        scene->entity_count = 3;
+        
+        scene->entities[0] = (Entity){
+            .kind     = Entity_Sphere,
+            .pos      = { 0, -100.5f, -1 },
+            .sphere.r = 100,
+        };
+        
+        scene->entities[1] = (Entity){
+            .kind     = Entity_Sphere,
+            .pos      = { -1, 0, -1 },
+            .sphere.r = 0.5f,
+        };
+        
+        scene->entities[2] = (Entity){
+            .kind     = Entity_Sphere,
+            .pos      = { -1, 0, -1 },
+            .sphere.r = -0.4f,
+        };
+#else
+        scene->entity_count = 15;
+        
+        scene->entities[0] = (Entity){
+            .kind  = Entity_Sphere,
+            .pos   = {0, 0, -5},
+            .sphere.r = 1,
+        };
+        
+        scene->entities[1] = (Entity){
+            .kind  = Entity_Sphere,
+            .pos   = {2.5f, 0, -7},
+            .sphere.r = 1,
+        };
+        
+        scene->entities[2] = (Entity){
+            .kind  = Entity_Sphere,
+            .pos   = {-2.5f, 0, -7},
+            .sphere.r = 1,
+        };
+        
+        scene->entities[3] = (Entity){
+            .kind  = Entity_Sphere,
+            .pos   = {-1, 4, -8},
+            .sphere.r = 1.5f,
+        };
+        
+        scene->entities[4] = (Entity){
+            .kind  = Entity_Sphere,
+            .pos   = {-10, 3, -20},
+            .sphere.r = 2.4f,
+        };
+        
+        scene->entities[5] = (Entity){
+            .kind  = Entity_Sphere,
+            .pos   = {6, 4, -4},
+            .sphere.r = 5,
+        };
+        
+        
+        
+        scene->entities[6] = (Entity){
+            .kind  = Entity_Sphere,
+            .pos   = {0, 0, -5},
+            .sphere.r = -0.4f,
+        };
+        
+        scene->entities[7] = (Entity){
+            .kind  = Entity_Sphere,
+            .pos   = {2.5f, 0, -7},
+            .sphere.r = -0.9f,
+        };
+        
+        scene->entities[8] = (Entity){
+            .kind  = Entity_Sphere,
+            .pos   = {-2.5f, 0, -7},
+            .sphere.r = -0.8f,
+        };
+        
+        scene->entities[9] = (Entity){
+            .kind  = Entity_Sphere,
+            .pos   = {-1, 4, -8},
+            .sphere.r = -1.1f,
+        };
+        
+        scene->entities[10] = (Entity){
+            .kind  = Entity_Sphere,
+            .pos   = {-10, 3, -20},
+            .sphere.r = -2.0f,
+        };
+        
+        scene->entities[11] = (Entity){
+            .kind  = Entity_Sphere,
+            .pos   = {6, 4, -4},
+            .sphere.r = -4.5f,
+        };
+        
+        scene->entities[12] = (Entity){
+            .kind  = Entity_Sphere,
+            .pos   = {6, 4, -4},
+            .sphere.r = 4,
+        };
+        
+        scene->entities[13] = (Entity){
+            .kind  = Entity_Sphere,
+            .pos   = {6, 4, -4},
+            .sphere.r = -1,
+        };
+        
+        scene->entities[14] = (Entity){
+            .kind  = Entity_Plane,
+            .pos   = {0, -1.5f, 0},
+            .plane.normal = {0,1,0},
+        };
+#endif
         String contents;
         Targa_Header header;
         if (Platform->ReadEntireFile(Platform->persistent_arena, STRING("skybox.tga"), &contents) &&
             Targa_ReadHeader(contents, &header) &&
             header.image_format == TargaImageFormat_UncompressedTrueColor)
         {
-            MainScene.skybox_width  = header.width;
-            MainScene.skybox_height = header.height;
-            MainScene.skybox_data   = (u32*)header.data;
+            scene->skybox_width  = header.width;
+            scene->skybox_height = header.height;
+            scene->skybox_data   = (u32*)header.data;
         }
         
-        else Platform->Print("Failed to load skybox\n");
+        Platform->user_pointer = scene;
     }
     
-    bool should_rerender = false;
+    scene = (Scene*)Platform->user_pointer;
     
-    if (MainCamera.target_width != Platform->width ||
-        MainCamera.target_height != Platform->height)
+    V3 camera_pos  = { 0, 0, 0 };
+    
+    f32 aspect_ratio = 16.0f / 10;
+    f32 focal_length = 1;
+    V2 screen_dim    = { 2*aspect_ratio, 2 };
+    u32 max_depth    = 50;
+    umm ray_count    = 1;
+    f32 epsilon      = 1.0e-4f;
+    
+    V3 screen_origin = { -screen_dim.x / 2, +screen_dim.y / 2, -focal_length };
+    V3 screen_step   = { screen_dim.x / Platform->width, -screen_dim.y / Platform->height, 0 };
+    
+    for (umm iy = 0; iy < Platform->height; ++iy)
     {
-        MainCamera.target_width  = Platform->width;
-        MainCamera.target_height = Platform->height;
-        MainCamera.fragment_size = 64;
-        
-        should_rerender = true;
+        for (umm ix = 0; ix < Platform->width; ++ix)
+        {
+            V3 color = {0};
+            
+            for (umm i = 0; i < ray_count; ++i)
+            {
+                V3 screen_point = V3_Add(screen_origin, V3_Hadamard(screen_step, (V3){ix+frand(&scene->seed), iy+frand(&scene->seed), 0}));
+                V3 ray = V3_Normalize(screen_point);
+                
+                color = V3_Add(color, Raytrace(scene, camera_pos, ray, max_depth, epsilon));
+            }
+            
+            // NOTE: Gamma correction for gamma = 2
+            color.x = Sqrt(color.x / ray_count);
+            color.y = Sqrt(color.y / ray_count);
+            color.z = Sqrt(color.z / ray_count);
+            
+            Platform->image[iy * Platform->width + ix] = V3_ToRGBU32(color);
+        }
     }
     
-    else if (MainCamera.width != MainCamera.target_width ||
-             MainCamera.height != MainCamera.target_height)
-    {
-        MainCamera.fragment_size = MAX(MainCamera.fragment_size / 2, 1);
-        
-        should_rerender = true;
-    }
-    
-    if (input.dir.x != 0 || input.dir.y != 0)
-    {
-        MainCamera.pos.xy = V2_Add(MainCamera.pos.xy, V2_Scale(input.dir, input.dt));
-        
-        MainCamera.fragment_size = 4;
-        should_rerender = true;
-    }
-    
-    if (should_rerender)
-    {
-        MainCamera.width  = (u32)((f32)MainCamera.target_width  / MainCamera.fragment_size); 
-        MainCamera.height = (u32)((f32)MainCamera.target_height / MainCamera.fragment_size); 
-        MainCamera.width  = MAX(MainCamera.width,  1);
-        MainCamera.height = MAX(MainCamera.height, 1);
-        
-        MainCamera.data = Platform->image;
-        
-        TraceScene(&MainCamera, &MainScene);
-        Platform->SwapBuffers();
-    }
+    Platform->SwapBuffers();
 }
