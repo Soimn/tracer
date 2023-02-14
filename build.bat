@@ -1,57 +1,39 @@
 @echo off
+setlocal
 
 if "%Platform%" neq "x64" (
-    echo ERROR: Platform is not "x64" - please run this from the MSVC x64 native tools command prompt.
+    echo ERROR: Platform is not "x64" - please run this from the MSVC x64 native tools command prompt or alternatively call vcvarsall.
     exit /b 1
 )
 
-set "diag_options= /nologo /FC /diagnostics:column /W4 /wd4996 /wd4116 /wd4100 /wd4201 /wd4101 /wd4204 /wd4200"
-set "nocrt_options= /Zl /GR- /GS- /Gs9999999"
-set "noctr_link= /STACK:0x100000,0x100000 /NODEFAULTLIB /SUBSYSTEM:windows"
-set "fast_fp= /fp:fast /fp:except-"
+set "root_dir=%cd%"
+set "build_dir=%root_dir%\build"
+set "src_dir=%root_dir%\src"
+set "run_dir=%root_dir%\run_path"
 
-IF NOT EXIST .\build mkdir build
-pushd .\build
+set "common_comp_options=/GS- /Oi /W4 /wd4201"
+set "common_link_options=/INCREMENTAL:no /opt:icf /opt:ref libvcruntime.lib kernel32.lib %temp_link_libs%"
 
-IF "%1"=="all" (
-set /A main=1
-set /A tracer=1
-) ELSE IF "%1"=="tracer" (
-set /A main=0
-set /A tracer=1
-) ELSE IF "%1"=="main" (
-set /A main=1
-set /A tracer=0
-) ELSE (
-echo Invalid arguments. Usage: build.bat [all/tracer/main] [debug/internal/release]
-GOTO :DONE
+if "%1"=="debug" (
+	set "comp_options=%common_comp_options% /DTR_DEBUG=1 /Od /Zo /Z7 /MTd /RTC1 /wd4100"
+	set "link_options=%common_link_options% libucrtd.lib libvcruntimed.lib"
+) else if "%1"=="release" (
+	set "comp_options=%common_comp_options% /O2"
+	set "link_options=%common_link_options%"
+) else (
+	echo Illegal first argument^, must be one of ^<debug^|release^>
+	goto end
 )
 
-IF "%2"=="debug" (
-set "compile_options= /DTR_DEBUG %nocrt_options% %diag_options% /Od /Zo /Zf /Z7"
-) ELSE IF "%1"=="internal" (
-set "compile_options= %nocrt_options% %diag_options% /O2 /Zo /Zf /Z7"
-) ELSE (
-set "compile_options= %nocrt_options% %diag_options% /O2 /Zo /Zf /Z7"
+if "%2" neq "" (
+	echo Illegal number of arguments^, expected^: build ^<debug^|release^>
+	goto end
 )
 
-set "link_options= /INCREMENTAL:NO /opt:ref /STACK:0x100000,0x100000 /NODEFAULTLIB /SUBSYSTEM:windows"
+if not exist %build_dir% mkdir %build_dir%
+cd %build_dir%
 
-IF /I "%tracer%" EQU "1" (
-	cl %compile_options% ..\src\tr_win32.c /link %link_options% /PDB:tracer.pdb /ENTRY:WinMainCRTStartup Kernel32.lib Winmm.lib User32.lib Gdi32.lib /out:tracer.exe
-	del tr_win32.obj
-	copy tracer.exe ..\run_path\.
-	copy tracer.pdb ..\run_path\.
-)
-IF /I "%main%" EQU "1" (
-	cl %compile_options% ..\src\tr_main.c /LD /link %link_options% Kernel32.lib /EXPORT:Tick /out:code.dll
-	del tr_main.obj
-	del tr_main.lib
-	del tr_main.exp
-	copy code.dll ..\run_path\.
-	copy code.pdb ..\run_path\.
-)
+cl /nologo /diagnostics:caret %comp_options% %src_dir%\tracer.c /link %link_options% /fixed /SUBSYSTEM:windows /out:tracer.exe /pdb:tracer.pdb user32.lib opengl32.lib gdi32.lib winmm.lib
 
-:DONE
-
-popd
+:end
+endlocal
