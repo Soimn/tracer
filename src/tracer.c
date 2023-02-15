@@ -98,8 +98,8 @@ int static_assert_fails_on_negative_bit_width : (EX) ? 1 : -1;      \
 
 u32* Backbuffer;
 u32* Frontbuffer;
-u32 BackbufferWidth;
-u32 BackbufferHeight;
+u32 BufferWidth;
+u32 BufferHeight;
 
 LRESULT
 WndProc(HWND window, UINT msg, WPARAM wparam, LPARAM lparam)
@@ -117,19 +117,22 @@ WndProc(HWND window, UINT msg, WPARAM wparam, LPARAM lparam)
         PAINTSTRUCT p = {0};
         HDC dc = BeginPaint(window, &p);
         
+        ASSERT(BufferWidth  < I32_MAX);
+        ASSERT(BufferHeight < I32_MAX);
+        ASSERT(BufferWidth*BufferHeight < U32_MAX);
         BITMAPINFO bmp_info = {
             .bmiHeader = {
                 .biSize          = sizeof(BITMAPINFOHEADER),
-                .biWidth         = BackbufferWidth,
-                .biHeight        = BackbufferHeight,
+                .biWidth         = (LONG)BufferWidth,
+                .biHeight        = -(LONG)BufferHeight,
                 .biPlanes        = 1,
                 .biBitCount      = 32,
                 .biCompression   = BI_RGB,
-                .biSizeImage     = BackbufferWidth*BackbufferHeight*4,
             },
+            .bmiColors = {0},
         };
         
-        StretchDIBits(dc, 0, BackbufferHeight, BackbufferWidth, -(i64)BackbufferHeight, 0, 0, BackbufferWidth, BackbufferHeight, Frontbuffer, &bmp_info, DIB_RGB_COLORS, SRCCOPY);
+        SetDIBitsToDevice(dc, 0, 0, BufferWidth, BufferHeight, 0, 0, 0, BufferHeight, Frontbuffer, &bmp_info, DIB_RGB_COLORS);
         
         EndPaint(window, &p);
         
@@ -140,16 +143,77 @@ WndProc(HWND window, UINT msg, WPARAM wparam, LPARAM lparam)
     return result;
 }
 
+void
+Render()
+{
+    // Clear screen
+    for (umm i = 0; i < BufferWidth*BufferHeight; ++i) Backbuffer[i] = 0;
+    
+    V3 sphere_pos = V3(0, 0, 4);
+    f32 sphere_r  = 1;
+    
+    V3x8 camera_pos = V3x8_Set1V3(V3(0, 0, 0));
+    
+    V3 to_light = V3(0, 1, 0);
+    
+    V3x8 l     = V3x8_Set1V3(to_light);
+    V3x8 p     = V3x8_Set1V3(sphere_pos);
+    V3x8 neg_p = V3x8_Sub(p, camera_pos);
+    
+    __m256 one     = _mm256_set1_ps(1);
+    __m256 neg_one = _mm256_set1_ps(-1);
+    __m256 zero    = _mm256_setzero_ps();
+    __m256 n255    = _mm256_set1_ps(255);
+    __m256 r       = _mm256_set1_ps(sphere_r);
+    __m256 c       = _mm256_fmsub_ps(r, r, V3x8_Inner(neg_p, neg_p));
+    __m256 ambient = _mm256_set1_ps(0.15f);
+    
+    __m256 n2x_rbufferwidth  = _mm256_set1_ps(2.0f/BufferWidth);
+    __m256 inv_aspect        = _mm256_set1_ps((f32)BufferHeight/BufferWidth);
+    __m256 counting_2x_rbufferwidth_m1 = _mm256_fmadd_ps(_mm256_load_ps((float[8]){0,1,2,3,4,5,6,7}), n2x_rbufferwidth, neg_one);
+    
+    for (umm sy = 0; sy < BufferHeight; ++sy)
+    {
+        __m256 y = _mm256_fmadd_ps(_mm256_sub_ps(zero, _mm256_set1_ps((f32)sy)), n2x_rbufferwidth, inv_aspect);
+        
+        for (umm sx = 0; sx < BufferWidth; sx += 8)
+        {
+            __m256 x = _mm256_fmadd_ps(_mm256_set1_ps((f32)sx), n2x_rbufferwidth, counting_2x_rbufferwidth_m1);
+            
+            V3x8 v = V3x8_Normalize(V3x8(x, y, one));
+            
+            __m256 b = V3x8_Inner(neg_p, v);
+            __m256 discriminant = _mm256_fmadd_ps(b, b, c);
+            __m256 t            = _mm256_sub_ps(b, _mm256_sqrt_ps(discriminant));
+            __m256 mask         = _mm256_and_ps(_mm256_cmp_ps(discriminant, zero, _CMP_GE_OQ), _mm256_cmp_ps(t, zero, _CMP_GE_OQ));
+            
+            V3x8 hit = V3x8_Scale(v, t);
+            V3x8 n   = V3x8_Normalize(V3x8_Sub(hit, p));
+            __m256 cos_theta = V3x8_Inner(n, l);
+            
+            __m256 intensity        = _mm256_min_ps(_mm256_add_ps(_mm256_max_ps(cos_theta, zero), ambient), one);
+            __m256 masked_intensity = _mm256_and_ps(intensity, mask);
+            
+            __m256i intensity_256 = _mm256_cvtps_epi32(_mm256_mul_ps(masked_intensity, n255));
+            __m256i color         = _mm256_or_si256(_mm256_or_si256(_mm256_slli_epi32(intensity_256, 16), _mm256_slli_epi32(intensity_256, 8)), intensity_256);
+            
+            _mm256_store_si256((__m256i*)(Backbuffer + sy*BufferWidth + sx), color);
+        }
+    }
+}
+
+
 void __stdcall
 WinMainCRTStartup()
 {
 	HINSTANCE instance = GetModuleHandle(0);
     
-    BackbufferWidth  = GetSystemMetrics(SM_CXSCREEN);
-    BackbufferHeight = GetSystemMetrics(SM_CYSCREEN);
-    u32* backbuffer_memory = VirtualAlloc(0, 2*ROUND_UP(BackbufferWidth*BackbufferHeight*sizeof(u32), 32), MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE);
+    // TODO: Ensure BufferWidth % 32 == 0
+    BufferWidth  = GetSystemMetrics(SM_CXSCREEN);
+    BufferHeight = GetSystemMetrics(SM_CYSCREEN);
+    u32* backbuffer_memory = VirtualAlloc(0, 2*ROUND_UP(BufferWidth*BufferHeight*sizeof(u32), 32), MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE);
     Backbuffer  = backbuffer_memory;
-    Frontbuffer = (u32*)((u8*)backbuffer_memory + ROUND_UP(BackbufferWidth*BackbufferHeight*sizeof(u32), 32));
+    Frontbuffer = (u32*)((u8*)backbuffer_memory + ROUND_UP(BufferWidth*BufferHeight*sizeof(u32), 32));
     
     if (backbuffer_memory == 0) OutputDebugStringA("Failed to allocate memory\n");
     else
@@ -167,7 +231,7 @@ WinMainCRTStartup()
         if (!RegisterClassExW(&window_class_info)) OutputDebugStringA("Failed to register window class\n");
         else
         {
-            HWND window = CreateWindowW(window_class_info.lpszClassName, L"Tracer", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, BackbufferWidth, BackbufferHeight, 0, 0, 0, 0);
+            HWND window = CreateWindowW(window_class_info.lpszClassName, L"Tracer", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, BufferWidth, BufferHeight, 0, 0, 0, 0);
             if (window == 0) OutputDebugStringA("Failed to create window\n");
             else
             {
@@ -194,7 +258,7 @@ WinMainCRTStartup()
                         else DispatchMessage(&msg);
                     }
                     
-                    // render
+                    Render();
                     
                     u32* tmp = Frontbuffer;
                     Frontbuffer = Backbuffer;
