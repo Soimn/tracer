@@ -101,6 +101,10 @@ u32* Frontbuffer;
 u32 BufferWidth;
 u32 BufferHeight;
 
+u32 StarmapWidth  = 512;
+u32 StarmapHeight = 256;
+u32* Starmap;
+
 LRESULT
 WndProc(HWND window, UINT msg, WPARAM wparam, LPARAM lparam)
 {
@@ -161,52 +165,77 @@ Render()
     V3x8 neg_p = V3x8_Sub(p, camera_pos);
     
     __m256 one     = _mm256_set1_ps(1);
-    __m256 neg_one = _mm256_set1_ps(-1);
     __m256 zero    = _mm256_setzero_ps();
     __m256 n255    = _mm256_set1_ps(255);
     __m256 r       = _mm256_set1_ps(sphere_r);
     __m256 c       = _mm256_fmsub_ps(r, r, V3x8_Inner(neg_p, neg_p));
     __m256 ambient = _mm256_set1_ps(0.15f);
     
-    __m256 n2x_rbufferwidth  = _mm256_set1_ps(2.0f/BufferWidth);
-    __m256 inv_aspect        = _mm256_set1_ps((f32)BufferHeight/BufferWidth);
-    __m256 counting_2x_rbufferwidth_m1 = _mm256_fmadd_ps(_mm256_load_ps((float[8]){0,1,2,3,4,5,6,7}), n2x_rbufferwidth, neg_one);
+    __m256 neg_2x_rbufferwidth             = _mm256_set1_ps(-2.0f/BufferWidth);
+    __m256 inv_aspect                      = _mm256_set1_ps((f32)BufferHeight/BufferWidth);
+    __m256 counting_neg_2x_rbufferwidth_p1 = _mm256_fmadd_ps(_mm256_load_ps((float[8]){0,1,2,3,4,5,6,7}), neg_2x_rbufferwidth, one);
+    
+    
+    __m256 starmap_height = _mm256_set1_ps((f32)StarmapHeight);
+    __m256 starmap_width  = _mm256_set1_ps((f32)StarmapWidth);
+    
+    __m256i rgb_mask = _mm256_set1_epi32(0xFFFFFF);
     
     for (umm sy = 0; sy < BufferHeight; ++sy)
     {
-        __m256 y = _mm256_fmadd_ps(_mm256_sub_ps(zero, _mm256_set1_ps((f32)sy)), n2x_rbufferwidth, inv_aspect);
+        __m256 y = _mm256_fmadd_ps(_mm256_set1_ps((f32)sy), neg_2x_rbufferwidth, inv_aspect);
         
         for (umm sx = 0; sx < BufferWidth; sx += 8)
         {
-            __m256 x = _mm256_fmadd_ps(_mm256_set1_ps((f32)sx), n2x_rbufferwidth, counting_2x_rbufferwidth_m1);
+            __m256 x = _mm256_fmadd_ps(_mm256_set1_ps((f32)sx), neg_2x_rbufferwidth, counting_neg_2x_rbufferwidth_p1);
             
             V3x8 v = V3x8_Normalize(V3x8(x, y, one));
             
             __m256 b = V3x8_Inner(neg_p, v);
             __m256 discriminant = _mm256_fmadd_ps(b, b, c);
             __m256 t            = _mm256_sub_ps(b, _mm256_sqrt_ps(discriminant));
-            __m256 mask         = _mm256_and_ps(_mm256_cmp_ps(discriminant, zero, _CMP_GE_OQ), _mm256_cmp_ps(t, zero, _CMP_GE_OQ));
+            __m256i mask        = _mm256_castps_si256(_mm256_and_ps(_mm256_cmp_ps(discriminant, zero, _CMP_GE_OQ), _mm256_cmp_ps(t, zero, _CMP_GE_OQ)));
             
             V3x8 hit = V3x8_Scale(v, t);
             V3x8 n   = V3x8_Normalize(V3x8_Sub(hit, p));
             __m256 cos_theta = V3x8_Inner(n, l);
             
             __m256 intensity        = _mm256_min_ps(_mm256_add_ps(_mm256_max_ps(cos_theta, zero), ambient), one);
-            __m256 masked_intensity = _mm256_and_ps(intensity, mask);
+            __m256i intensity_256   = _mm256_cvtps_epi32(_mm256_mul_ps(intensity, n255));
+            __m256i intensity_color = _mm256_or_si256(_mm256_or_si256(_mm256_slli_epi32(intensity_256, 16), _mm256_slli_epi32(intensity_256, 8)), intensity_256);
             
-            __m256i intensity_256 = _mm256_cvtps_epi32(_mm256_mul_ps(masked_intensity, n255));
-            __m256i color         = _mm256_or_si256(_mm256_or_si256(_mm256_slli_epi32(intensity_256, 16), _mm256_slli_epi32(intensity_256, 8)), intensity_256);
+            __m256 starmap_lon = _mm256_atan2_ps(v.x, v.z);
+            __m256 starmap_lat = _mm256_atan2_ps(v.y, _mm256_sqrt_ps(_mm256_add_ps(_mm256_mul_ps(v.x, v.x), _mm256_mul_ps(v.z, v.z))));
             
-            _mm256_store_si256((__m256i*)(Backbuffer + sy*BufferWidth + sx), color);
+            __m256 starmap_u = _mm256_div_ps(_mm256_add_ps(starmap_lon, _mm256_set1_ps(PI32)), _mm256_set1_ps(TAU32));
+            __m256 starmap_v = _mm256_div_ps(_mm256_add_ps(starmap_lat, _mm256_set1_ps(PI32/2)), _mm256_set1_ps(PI32));
+            
+            __m256i starmap_index = _mm256_cvtps_epi32(_mm256_mul_ps(_mm256_add_ps(_mm256_mul_ps(starmap_v, starmap_height), starmap_u), starmap_width));
+            
+            __m256i starmap_color = _mm256_and_si256(_mm256_i32gather_epi32((int*)Starmap, starmap_index, 4), rgb_mask);
+            
+            __m256i color = _mm256_blendv_epi8(starmap_color, intensity_color, mask);
+            
+            _mm256_store_si256((__m256i*)(Backbuffer + sy*BufferWidth + sx), starmap_color);
         }
     }
 }
 
-
 void __stdcall
 WinMainCRTStartup()
 {
-	HINSTANCE instance = GetModuleHandle(0);
+    HINSTANCE instance = GetModuleHandle(0);
+    
+    Starmap = VirtualAlloc(0, StarmapWidth*StarmapHeight*4, MEM_RESERVE|MEM_COMMIT, PAGE_READWRITE);
+    
+    HANDLE starmap_file_handle = CreateFileA("res/starmap.tga", GENERIC_READ, FILE_SHARE_READ, 0, OPEN_EXISTING, 0, 0);
+    
+    OVERLAPPED overlapped = {
+        .Offset     = 18,
+        .OffsetHigh = 0,
+    };
+    ReadFile(starmap_file_handle, Starmap, StarmapWidth*StarmapHeight*4, 0, &overlapped);
+    CloseHandle(starmap_file_handle);
     
     // TODO: Ensure BufferWidth % 32 == 0
     BufferWidth  = GetSystemMetrics(SM_CXSCREEN);

@@ -3,3 +3,4 @@ run_path/*.dll
 run_path/*.exe
 run_path/*.pdb
 project.4coder
+res/*
